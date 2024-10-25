@@ -3,7 +3,6 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 import numpy as np
 import os
-import string
 
 class DataProcessorApp:
     def __init__(self, root):
@@ -103,6 +102,13 @@ class DataProcessorApp:
                     else:
                         error_value = ""
                     
+                    # Attempt to convert 'M' column to numeric, with error handling for non-numeric data
+                    units = pd.to_numeric(feed_row['M'], errors='coerce')
+                    if pd.notna(units):
+                        units = -units  # Apply the negative sign
+                    else:
+                        units = np.nan  # Set to NaN if non-numeric
+                    
                     # For each matching CDR entry, create an output row
                     for _, cdr_row in cdr_filtered.iterrows():
                         output_row = {
@@ -130,7 +136,7 @@ class DataProcessorApp:
                             "EQD_DF_FLAG": "",  # Leave blank
                             "EQD_SEC_FLAG": "TRUE" if feed_row['AM'] == 'Y' else "FALSE",
                             "Underlying": "",  # No data specified yet
-                            "Units": -feed_row['M'],  # Negative value of Column M in feed file
+                            "Units": units,  # Use the processed units value
                             "Contract size": feed_row['Z'],  # Column Z in feed file
                             "Call/put": feed_row['J'],  # Column J in feed file
                             "CCY": feed_row['K'],  # Column K in feed file
@@ -139,7 +145,7 @@ class DataProcessorApp:
                             "Unit Price (Local CCY)": feed_row['AJ'],  # Column AJ in feed file
                             "COB": "",  # Leave blank
                             "Close": idx,  # Set based on file source (1, 2, or 3)
-                            "MTM (Local CCY)": feed_row['Y'] * feed_row['Z'] * feed_row['AE'],
+                            "MTM (Local CCY)": pd.to_numeric(feed_row['Y'], errors='coerce') * pd.to_numeric(feed_row['Z'], errors='coerce') * pd.to_numeric(feed_row['AE'], errors='coerce'),
                             "MTM USD": "",  # Leave blank
                             "Strategy": feed_row['U'],  # Column U in feed file
                             "Load Type": ""  # No data specified yet
