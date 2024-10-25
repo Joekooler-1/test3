@@ -1,10 +1,11 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import threading
+from tkinter import ttk  # For the progress bar
 import pandas as pd
 import numpy as np
 import os
 import gc
+import multiprocessing as mp
 
 def generate_column_names(num_columns):
     column_names = []
@@ -17,48 +18,41 @@ def generate_column_names(num_columns):
     return column_names
 
 def load_relevant_cdr_rows(cdr_file_path, required_values):
-    # Read the first chunk to determine the actual column count in the CDR file
     first_chunk = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, nrows=1)
     actual_column_count = first_chunk.shape[1]
     cdr_columns = generate_column_names(actual_column_count)
 
-    # Load only the necessary rows from the CDR file in chunks, using the actual column count
     cdr_filtered_chunks = []
-    cdr_iterator = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, chunksize=10000, names=cdr_columns)
+    cdr_iterator = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, chunksize=1000, names=cdr_columns)
 
     for chunk in cdr_iterator:
-        # Filter rows to include only those with values in `required_values`
         filtered_chunk = chunk[chunk['J'].isin(required_values)]
         cdr_filtered_chunks.append(filtered_chunk)
 
-    # Concatenate all filtered chunks into a single DataFrame and set index for merging
     cdr_df = pd.concat(cdr_filtered_chunks).set_index('J')
     return cdr_df
 
-def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
-    # Set a smaller chunk size to reduce memory usage
-    chunk_size = 2000
+def process_single_feed_file(feed_file, cdr_df, output_file, close_value, progress_queue, cancel_flag):
+    chunk_size = 1000
     first_chunk = True
 
     for feed_chunk in pd.read_csv(feed_file, header=None, encoding='ISO-8859-1', chunksize=chunk_size):
+        if cancel_flag.value == 1:
+            return  # Exit if cancel flag is set
+
         feed_columns = generate_column_names(feed_chunk.shape[1])
         feed_chunk.columns = feed_columns
         feed_chunk.set_index('B', inplace=True)  # Assuming 'B' is the key for merging
 
-        # Merge chunk with filtered CDR data
         merged_df = feed_chunk.join(cdr_df, how='left', rsuffix='_cdr')
-
-        # Convert necessary columns to reduce memory
         numeric_cols = ['M', 'Y', 'Z', 'AE']
         merged_df[numeric_cols] = merged_df[numeric_cols].apply(pd.to_numeric, errors='coerce', downcast='float')
 
-        # Convert large, repeated text columns to categorical to save memory
-        merged_df['Product'] = 'Equity Derivatives'  # Assuming this is constant
+        merged_df['Product'] = 'Equity Derivatives'
         merged_df['Product'] = merged_df['Product'].astype('category')
         merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
         merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
         
-        # Use numpy for vectorized calculations
         merged_df['Units'] = -np.asarray(merged_df['M'], dtype=np.float32)
         merged_df['MTM (Local CCY)'] = (
             np.asarray(merged_df['Y'], dtype=np.float32) * 
@@ -67,7 +61,6 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
         )
         merged_df['Close'] = close_value
 
-        # Collect output columns
         output_df = merged_df.assign(
             Sent_Status="",
             Sent="",
@@ -108,25 +101,24 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
             Load_Type=""
         )
 
-        # Append processed chunk to output CSV file incrementally
         output_df.to_csv(output_file, mode='a', index=False, header=first_chunk)
-        first_chunk = False  # After the first write, subsequent chunks will not write the header
+        first_chunk = False
 
-        # Explicitly delete processed data and run garbage collection
         del feed_chunk, merged_df, output_df
         gc.collect()
+
+    progress_queue.put(1)  # Signal completion for this file
 
 class DataProcessorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Data Processor")
         
-        # File paths
         self.feed_files = [None, None, None]
         self.cdr_file = None
         self.output_file = None
-        
-        # UI Setup
+        self.process_pool = None
+
         tk.Label(root, text="Select Feed File 1").grid(row=0, column=0, padx=10, pady=5)
         self.feed1_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(0))
         self.feed1_btn.grid(row=0, column=1, padx=10, pady=5)
@@ -147,10 +139,15 @@ class DataProcessorApp:
         self.output_btn = tk.Button(root, text="Browse", command=self.select_output_file)
         self.output_btn.grid(row=4, column=1, padx=10, pady=5)
         
-        # Process Button
-        self.process_btn = tk.Button(root, text="Process Files", command=self.start_processing)
-        self.process_btn.grid(row=5, column=0, columnspan=2, pady=20)
+        self.progress = ttk.Progressbar(root, orient='horizontal', length=300, mode='determinate')
+        self.progress.grid(row=6, column=0, columnspan=2, pady=10)
 
+        self.process_btn = tk.Button(root, text="Process Files", command=self.start_processing)
+        self.process_btn.grid(row=5, column=0, pady=20)
+
+        self.cancel_btn = tk.Button(root, text="Cancel", command=self.cancel_processing)
+        self.cancel_btn.grid(row=5, column=1, pady=20)
+    
     def select_file(self, idx):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if file_path:
@@ -170,10 +167,18 @@ class DataProcessorApp:
             tk.Label(self.root, text=os.path.basename(file_path)).grid(row=4, column=2)
 
     def start_processing(self):
-        # Run the file processing in a separate thread to keep the GUI responsive
         self.process_btn.config(state="disabled", text="Processing...")
-        processing_thread = threading.Thread(target=self.process_files)
-        processing_thread.start()
+        self.cancel_flag = mp.Value('i', 0)
+        self.progress_queue = mp.Queue()
+        self.progress['value'] = 0
+        threading.Thread(target=self.process_files).start()
+
+    def cancel_processing(self):
+        self.cancel_flag.value = 1
+        if self.process_pool:
+            self.process_pool.terminate()
+        self.process_btn.config(state="normal", text="Process Files")
+        self.progress.stop()
 
     def process_files(self):
         if not all(self.feed_files) or not self.cdr_file or not self.output_file:
@@ -182,27 +187,40 @@ class DataProcessorApp:
             return
         
         try:
-            # Collect unique short_name values from all feed files
-            required_values = set()
-            for feed_file in self.feed_files:
-                for chunk in pd.read_csv(feed_file, header=None, usecols=[1], chunksize=10000, encoding='ISO-8859-1'):
-                    required_values.update(chunk[1].unique())
-            
-            # Load only relevant rows from CDR file
+            required_values = {chunk[1].unique() for feed_file in self.feed_files for chunk in pd.read_csv(feed_file, header=None, usecols=[1], chunksize=1000, encoding='ISO-8859-1')}
             cdr_df = load_relevant_cdr_rows(self.cdr_file, required_values)
+            total_files = len(self.feed_files)
 
-            # Process each feed file in chunks and append to output file
-            for i, feed_file in enumerate(self.feed_files, start=1):
-                process_single_feed_file(feed_file, cdr_df, self.output_file, i)
-            
-            messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
+            with mp.Pool(processes=mp.cpu_count()) as pool:
+                self.process_pool = pool
+                tasks = [
+                    pool.apply_async(process_single_feed_file, args=(
+                        feed_file, cdr_df, self.output_file, i, self.progress_queue, self.cancel_flag
+                    ))
+                    for i, feed_file in enumerate(self.feed_files, start=1)
+                ]
+
+                completed = 0
+                while completed < total_files:
+                    if self.cancel_flag.value == 1:
+                        break
+                    self.progress_queue.get()
+                    completed += 1
+                    self.progress['value'] = (completed / total_files) * 100
+                    self.root.update_idletasks()
+
+                pool.close()
+                pool.join()
+                
+            if self.cancel_flag.value == 0:
+                messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
         
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {e}")
         
         finally:
-            # Re-enable the process button and reset the text after processing
             self.process_btn.config(state="normal", text="Process Files")
+            self.progress['value'] = 0
 
 # Run the application
 if __name__ == '__main__':
