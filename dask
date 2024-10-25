@@ -16,16 +16,18 @@ def generate_column_names(num_columns):
     return column_names
 
 def load_relevant_cdr_rows(cdr_file_path, required_values):
-    # Load only the necessary rows from the CDR file that match `required_values`
-    cdr_iterator = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, chunksize=10000)
-    cdr_filtered_chunks = []
+    # Read the first chunk to determine the actual column count in the CDR file
+    first_chunk = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, nrows=1)
+    actual_column_count = first_chunk.shape[1]
+    cdr_columns = generate_column_names(actual_column_count)
 
-    # Generate column names and assign them to each chunk
-    cdr_columns = generate_column_names(len(required_values))
+    # Load only the necessary rows from the CDR file in chunks, using the actual column count
+    cdr_filtered_chunks = []
+    cdr_iterator = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, chunksize=10000, names=cdr_columns)
 
     for chunk in cdr_iterator:
-        chunk.columns = cdr_columns
-        filtered_chunk = chunk[chunk['J'].isin(required_values)]  # Filter rows
+        # Filter rows to include only those with values in `required_values`
+        filtered_chunk = chunk[chunk['J'].isin(required_values)]
         cdr_filtered_chunks.append(filtered_chunk)
 
     # Concatenate all filtered chunks into a single DataFrame and set index for merging
