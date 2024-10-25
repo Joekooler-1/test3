@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import ttk  # For the progress bar
+import threading
 import pandas as pd
 import numpy as np
 import os
@@ -18,10 +19,12 @@ def generate_column_names(num_columns):
     return column_names
 
 def load_relevant_cdr_rows(cdr_file_path, required_values):
+    # Read the first chunk to determine the actual column count in the CDR file
     first_chunk = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, nrows=1)
     actual_column_count = first_chunk.shape[1]
     cdr_columns = generate_column_names(actual_column_count)
 
+    # Load only the necessary rows from the CDR file in chunks, using the actual column count
     cdr_filtered_chunks = []
     cdr_iterator = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, chunksize=1000, names=cdr_columns)
 
@@ -29,6 +32,7 @@ def load_relevant_cdr_rows(cdr_file_path, required_values):
         filtered_chunk = chunk[chunk['J'].isin(required_values)]
         cdr_filtered_chunks.append(filtered_chunk)
 
+    # Concatenate all filtered chunks into a single DataFrame and set index for merging
     cdr_df = pd.concat(cdr_filtered_chunks).set_index('J')
     return cdr_df
 
@@ -187,7 +191,10 @@ class DataProcessorApp:
             return
         
         try:
-            required_values = {chunk[1].unique() for feed_file in self.feed_files for chunk in pd.read_csv(feed_file, header=None, usecols=[1], chunksize=1000, encoding='ISO-8859-1')}
+            # Corrected set comprehension to collect unique short_name values without error
+            required_values = {val for feed_file in self.feed_files for chunk in pd.read_csv(feed_file, header=None, usecols=[1], chunksize=1000, encoding='ISO-8859-1') for val in chunk[1].unique()}
+            
+            # Load only relevant rows from CDR file
             cdr_df = load_relevant_cdr_rows(self.cdr_file, required_values)
             total_files = len(self.feed_files)
 
@@ -227,3 +234,4 @@ if __name__ == '__main__':
     root = tk.Tk()
     app = DataProcessorApp(root)
     root.mainloop()
+
