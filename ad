@@ -42,10 +42,6 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
         if 'Highest_available_display_name' not in merged_df.columns or 'LEI' not in merged_df.columns or 'CDRID' not in merged_df.columns:
             print("Warning: One of 'Highest_available_display_name', 'LEI', or 'CDRID' columns is missing after merge.")
 
-        # Convert necessary columns to reduce memory
-        numeric_cols = ['M', 'Y', 'Z', 'AE']
-        merged_df[numeric_cols] = merged_df[numeric_cols].apply(pd.to_numeric, errors='coerce', downcast='float')
-
         # Convert large, repeated text columns to categorical to save memory
         merged_df['Product'] = 'Equity Derivatives'
         merged_df['Product'] = merged_df['Product'].astype('category')
