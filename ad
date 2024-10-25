@@ -38,13 +38,13 @@ class DataProcessorApp:
         # Process Button
         self.process_btn = tk.Button(root, text="Process Files", command=self.process_files)
         self.process_btn.grid(row=5, column=0, columnspan=2, pady=20)
-        
+    
     def select_file(self, idx):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if file_path:
             self.feed_files[idx] = file_path
             tk.Label(self.root, text=os.path.basename(file_path)).grid(row=idx, column=2)
-            
+    
     def select_cdr_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("PSV Files", "*.psv")])
         if file_path:
@@ -63,19 +63,20 @@ class DataProcessorApp:
             return
         
         try:
-            # Read the CDR file
-            cdr_df = pd.read_csv(self.cdr_file, sep='|')
+            # Read the CDR file with headers and specific encoding
+            cdr_df = pd.read_csv(self.cdr_file, sep='|', encoding='ISO-8859-1')
             
             # Prepare an empty list to store each processed feed file's DataFrame
             combined_data = []
             
             # Process each feed file
             for idx, feed_file in enumerate(self.feed_files, start=1):
-                feed_df = pd.read_csv(feed_file)
+                # Read feed file without headers
+                feed_df = pd.read_csv(feed_file, header=None, encoding='ISO-8859-1')
                 
-                # Process each row in the feed file based on its 'Short_name' in Column B
+                # Process each row in the feed file based on its 'Short_name' (column index 1)
                 for _, feed_row in feed_df.iterrows():
-                    short_name = feed_row['B']  # Assuming Column B is labeled 'B' for 'Short_name'
+                    short_name = feed_row[1]  # Assuming 'Short_name' is in column index 1
                     
                     # Filter CDR rows where Column J matches the current Short_name
                     cdr_filtered = cdr_df[cdr_df['J'] == short_name]
@@ -101,30 +102,30 @@ class DataProcessorApp:
                             "Entity": cdr_row['V'] if pd.notna(cdr_row['V']) else cdr_row['C'],
                             "Entity_ID": cdr_row['F'],
                             "CDRID": cdr_row['A'],
-                            "EQD_Client": feed_row['C'],
-                            "Trade ID": feed_row['F'],
+                            "EQD_Client": feed_row[2],  # Column C in feed file
+                            "Trade ID": feed_row[5],  # Column F in feed file
                             "RBC ID": "",
                             "RBC Name": "",
                             "RBC_shortname": "",
                             "Fund": cdr_row['C'],
-                            "Trade date": feed_row['O'],
-                            "Maturity Date": feed_row['P'],
-                            "Sub Product": feed_row['H'],
+                            "Trade date": feed_row[14],  # Column O in feed file
+                            "Maturity Date": feed_row[15],  # Column P in feed file
+                            "Sub Product": feed_row[7],  # Column H in feed file
                             "EQD_DF_FLAG": "",  # Leave blank
-                            "EQD_SEC_FLAG": "TRUE" if feed_row['AM'] == 'Y' else "FALSE",
+                            "EQD_SEC_FLAG": "TRUE" if feed_row[38] == 'Y' else "FALSE",  # Column AM in feed file
                             "Underlying": "",  # No data specified yet
-                            "Units": -feed_row['M'],  # Negative value of 'Units'
-                            "Contract size": feed_row['Z'],
-                            "Call/put": feed_row['J'],
-                            "CCY": feed_row['K'],
-                            "Long/Short": feed_row['L'],
+                            "Units": -feed_row[12],  # Negative value of Column M in feed file
+                            "Contract size": feed_row[25],  # Column Z in feed file
+                            "Call/put": feed_row[9],  # Column J in feed file
+                            "CCY": feed_row[10],  # Column K in feed file
+                            "Long/Short": feed_row[11],  # Column L in feed file
                             "Adjustment": "",  # Leave blank
-                            "Unit Price (Local CCY)": feed_row['AJ'],
+                            "Unit Price (Local CCY)": feed_row[36],  # Column AJ in feed file
                             "COB": "",  # Leave blank
                             "Close": idx,  # Set based on file source (1, 2, or 3)
-                            "MTM (Local CCY)": feed_row['Y'] * feed_row['Z'] * feed_row['AE'],
+                            "MTM (Local CCY)": feed_row[24] * feed_row[25] * feed_row[30],  # Y * Z * AE
                             "MTM USD": "",  # Leave blank
-                            "Strategy": feed_row['U'],
+                            "Strategy": feed_row[20],  # Column U in feed file
                             "Load Type": ""  # No data specified yet
                         }
                         
