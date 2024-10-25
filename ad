@@ -3,7 +3,7 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 import numpy as np
 import os
-import gc  # Import garbage collection module for explicit memory management
+import gc
 
 def generate_column_names(num_columns):
     column_names = []
@@ -26,13 +26,13 @@ def load_cdr_file(cdr_file_path):
 
 def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
     # Set a smaller chunk size to reduce memory usage
-    chunk_size = 2000  # Adjust to an appropriate size for your system's memory
+    chunk_size = 2000
     first_chunk = True
 
     for feed_chunk in pd.read_csv(feed_file, header=None, encoding='ISO-8859-1', chunksize=chunk_size):
         feed_columns = generate_column_names(feed_chunk.shape[1])
         feed_chunk.columns = feed_columns
-        feed_chunk.set_index('B', inplace=True)  # Assuming 'B' is the key for merging
+        feed_chunk.set_index('B', inplace=True)
 
         # Merge chunk with CDR data
         merged_df = feed_chunk.join(cdr_df, how='left', rsuffix='_cdr')
@@ -42,7 +42,7 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
         merged_df[numeric_cols] = merged_df[numeric_cols].apply(pd.to_numeric, errors='coerce', downcast='float')
 
         # Convert large, repeated text columns to categorical to save memory
-        merged_df['Product'] = 'Equity Derivatives'  # Assuming this is constant
+        merged_df['Product'] = 'Equity Derivatives'
         merged_df['Product'] = merged_df['Product'].astype('category')
         merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
         merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
@@ -56,7 +56,7 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
         )
         merged_df['Close'] = close_value
 
-        # Collect output columns
+        # Collect output columns and ensure only the required 37 columns are included
         output_df = merged_df.assign(
             Sent_Status="",
             Sent="",
@@ -97,7 +97,17 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
             Load_Type=""
         )
 
-        # Append processed chunk to output CSV file incrementally
+        # Define the exact order of the 37 output columns
+        output_columns = [
+            'Sent_Status', 'Sent', 'Error', 'Product', 'Name', 'LEI', 'AppandShortName', 'CDR_Application',
+            'Short_name', 'Entity', 'Entity_ID', 'CDRID', 'EQD_Client', 'Trade_ID', 'RBC_ID', 'RBC_Name', 
+            'RBC_shortname', 'Fund', 'Trade_date', 'Maturity_Date', 'Sub_Product', 'EQD_DF_FLAG', 'EQD_SEC_FLAG',
+            'Underlying', 'Units', 'Contract_size', 'Call_put', 'CCY', 'Long_Short', 'Adjustment', 
+            'Unit_Price_Local_CCY', 'COB', 'Close', 'MTM_Local_CCY', 'MTM_USD', 'Strategy', 'Load_Type'
+        ]
+
+        # Select only the 37 columns and write them to the output file
+        output_df = output_df[output_columns]
         output_df.to_csv(output_file, mode='a', index=False, header=first_chunk)
         first_chunk = False  # After the first write, subsequent chunks will not write the header
 
