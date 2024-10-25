@@ -3,6 +3,8 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 import numpy as np
 import os
+import multiprocessing as mp
+from multiprocessing import Queue
 
 class DataProcessorApp:
     def __init__(self, root):
@@ -10,7 +12,7 @@ class DataProcessorApp:
         self.root.title("Data Processor")
         
         # File paths
-        self.feed_files = [None, None, None]  # To store paths of three feed files
+        self.feed_files = [None, None, None]
         self.cdr_file = None
         self.output_file = None
         
@@ -56,9 +58,8 @@ class DataProcessorApp:
         if file_path:
             self.output_file = file_path
             tk.Label(self.root, text=os.path.basename(file_path)).grid(row=4, column=2)
-    
+
     def generate_column_names(self, num_columns):
-        """ Generate column names up to the required number of columns (A, B, ..., Z, AA, AB, ...) """
         column_names = []
         for i in range(1, num_columns + 1):
             name = ""
@@ -67,97 +68,111 @@ class DataProcessorApp:
                 name = chr(65 + remainder) + name
             column_names.append(name)
         return column_names
-    
+
+    def load_cdr_file(self):
+        # Load the CDR file without headers, assign dynamic column names, and set index for fast merging
+        cdr_df = pd.read_csv(self.cdr_file, sep='|', encoding='ISO-8859-1', header=None)
+        cdr_columns = self.generate_column_names(cdr_df.shape[1])
+        cdr_df.columns = cdr_columns
+        cdr_df.set_index('J', inplace=True)  # Assuming 'J' is the key for merging
+        return cdr_df
+
+    def process_single_feed_file(self, feed_file, cdr_df, output_queue, close_value):
+        # Load the feed file without headers and set index for merging
+        feed_df = pd.read_csv(feed_file, header=None, encoding='ISO-8859-1')
+        feed_columns = self.generate_column_names(feed_df.shape[1])
+        feed_df.columns = feed_columns
+        feed_df.set_index('B', inplace=True)  # Assuming 'B' is the key for merging
+
+        # Merge with CDR file on index for faster lookup
+        merged_df = feed_df.join(cdr_df, how='left', rsuffix='_cdr')
+
+        # Convert necessary columns to numeric in one step for efficiency
+        numeric_cols = ['M', 'Y', 'Z', 'AE']
+        merged_df[numeric_cols] = merged_df[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+        # Use numpy for vectorized calculations
+        merged_df['Units'] = -np.asarray(merged_df['M'])
+        merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
+        merged_df['MTM (Local CCY)'] = (
+            np.asarray(merged_df['Y']) * np.asarray(merged_df['Z']) * np.asarray(merged_df['AE'])
+        )
+        merged_df['Close'] = close_value
+
+        # Collect output columns
+        output_df = merged_df.assign(
+            Sent_Status="",
+            Sent="",
+            Error=np.where(merged_df['A_cdr'].isna(), "Error", ""),
+            Product="Equity Derivatives",
+            Name=merged_df['Z'],
+            LEI=merged_df['Y'],
+            AppandShortName="GLOBALBOOK|" + merged_df.index.astype(str),
+            CDR_Application="GLOBALBOOK",
+            Short_name=merged_df.index,
+            Entity=np.where(merged_df['V'].notna(), merged_df['V'], merged_df['C']),
+            Entity_ID=merged_df['F'],
+            CDRID=merged_df['A_cdr'],
+            EQD_Client=merged_df['C'],
+            Trade_ID=merged_df['F'],
+            RBC_ID="",
+            RBC_Name="",
+            RBC_shortname="",
+            Fund=merged_df['C'],
+            Trade_date=merged_df['O'],
+            Maturity_Date=merged_df['P'],
+            Sub_Product=merged_df['H'],
+            EQD_DF_FLAG="",
+            EQD_SEC_FLAG=merged_df['EQD_SEC_FLAG'],
+            Underlying="",
+            Units=merged_df['Units'],
+            Contract_size=merged_df['Z'],
+            Call_put=merged_df['J'],
+            CCY=merged_df['K'],
+            Long_Short=merged_df['L'],
+            Adjustment="",
+            Unit_Price_Local_CCY=merged_df['AJ'],
+            COB="",
+            Close=merged_df['Close'],
+            MTM_Local_CCY=merged_df['MTM (Local CCY)'],
+            MTM_USD="",
+            Strategy=merged_df['U'],
+            Load_Type=""
+        )
+        
+        # Add the result to the output queue
+        output_queue.put(output_df)
+
     def process_files(self):
         if not all(self.feed_files) or not self.cdr_file or not self.output_file:
             messagebox.showerror("Error", "Please select all feed files, CDR file, and output file.")
             return
         
         try:
-            # Read the CDR file without headers and determine the number of columns
-            cdr_df = pd.read_csv(self.cdr_file, sep='|', encoding='ISO-8859-1', header=None)
-            cdr_columns = self.generate_column_names(cdr_df.shape[1])
-            cdr_df.columns = cdr_columns
+            # Load CDR file once and use it for all feed files
+            cdr_df = self.load_cdr_file()
+
+            # Multiprocessing queue for collecting results
+            output_queue = mp.Queue()
+            processes = []
+
+            # Start a process for each feed file
+            for i, feed_file in enumerate(self.feed_files, start=1):
+                p = mp.Process(target=self.process_single_feed_file, args=(feed_file, cdr_df, output_queue, i))
+                processes.append(p)
+                p.start()
+
+            # Wait for all processes to complete
+            for p in processes:
+                p.join()
             
-            # Prepare an empty list to store each processed feed file's DataFrame
+            # Collect all results from the queue
             combined_data = []
+            while not output_queue.empty():
+                combined_data.append(output_queue.get())
             
-            # Process each feed file
-            for idx, feed_file in enumerate(self.feed_files, start=1):
-                # Read feed file without headers and assign dynamic column names
-                feed_df = pd.read_csv(feed_file, header=None, encoding='ISO-8859-1')
-                feed_columns = self.generate_column_names(feed_df.shape[1])
-                feed_df.columns = feed_columns
-                
-                # Process each row in the feed file based on its 'Short_name' (column B)
-                for _, feed_row in feed_df.iterrows():
-                    short_name = feed_row['B']  # 'Short_name' assumed to be in column B
-                    
-                    # Filter CDR rows where Column J matches the current Short_name
-                    cdr_filtered = cdr_df[cdr_df['J'] == short_name]
-                    
-                    # Handle cases where there may be no matching row in the CDR file
-                    if cdr_filtered.empty:
-                        error_value = "Error"  # Set error if no CDR row found
-                    else:
-                        error_value = ""
-                    
-                    # Attempt to convert 'M' column to numeric, with error handling for non-numeric data
-                    units = pd.to_numeric(feed_row['M'], errors='coerce')
-                    if pd.notna(units):
-                        units = -units  # Apply the negative sign
-                    else:
-                        units = np.nan  # Set to NaN if non-numeric
-                    
-                    # For each matching CDR entry, create an output row
-                    for _, cdr_row in cdr_filtered.iterrows():
-                        output_row = {
-                            "Sent Status": "",  # Leave blank
-                            "Sent": "",  # Leave blank
-                            "Error": error_value,  # Error logic
-                            "Product": "Equity Derivatives",
-                            "Name": cdr_row['Z'],
-                            "LEI": cdr_row['Y'],
-                            "AppandShortName": f"GLOBALBOOK|{short_name}",
-                            "CDR_Application": "GLOBALBOOK",
-                            "Short_name": short_name,
-                            "Entity": cdr_row['V'] if pd.notna(cdr_row['V']) else cdr_row['C'],
-                            "Entity_ID": cdr_row['F'],
-                            "CDRID": cdr_row['A'],
-                            "EQD_Client": feed_row['C'],  # Column C in feed file
-                            "Trade ID": feed_row['F'],  # Column F in feed file
-                            "RBC ID": "",
-                            "RBC Name": "",
-                            "RBC_shortname": "",
-                            "Fund": cdr_row['C'],
-                            "Trade date": feed_row['O'],  # Column O in feed file
-                            "Maturity Date": feed_row['P'],  # Column P in feed file
-                            "Sub Product": feed_row['H'],  # Column H in feed file
-                            "EQD_DF_FLAG": "",  # Leave blank
-                            "EQD_SEC_FLAG": "TRUE" if feed_row['AM'] == 'Y' else "FALSE",
-                            "Underlying": "",  # No data specified yet
-                            "Units": units,  # Use the processed units value
-                            "Contract size": feed_row['Z'],  # Column Z in feed file
-                            "Call/put": feed_row['J'],  # Column J in feed file
-                            "CCY": feed_row['K'],  # Column K in feed file
-                            "Long/Short": feed_row['L'],  # Column L in feed file
-                            "Adjustment": "",  # Leave blank
-                            "Unit Price (Local CCY)": feed_row['AJ'],  # Column AJ in feed file
-                            "COB": "",  # Leave blank
-                            "Close": idx,  # Set based on file source (1, 2, or 3)
-                            "MTM (Local CCY)": pd.to_numeric(feed_row['Y'], errors='coerce') * pd.to_numeric(feed_row['Z'], errors='coerce') * pd.to_numeric(feed_row['AE'], errors='coerce'),
-                            "MTM USD": "",  # Leave blank
-                            "Strategy": feed_row['U'],  # Column U in feed file
-                            "Load Type": ""  # No data specified yet
-                        }
-                        
-                        # Append the output row to the combined data
-                        combined_data.append(output_row)
-            
-            # Convert the combined data into a DataFrame
-            final_df = pd.DataFrame(combined_data)
-            
-            # Output the final combined DataFrame to the specified output file
+            # Concatenate and save the final DataFrame
+            final_df = pd.concat(combined_data, ignore_index=True)
             final_df.to_csv(self.output_file, index=False)
             messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
         
@@ -165,6 +180,7 @@ class DataProcessorApp:
             messagebox.showerror("Error", f"An error occurred: {e}")
 
 # Run the application
-root = tk.Tk()
-app = DataProcessorApp(root)
-root.mainloop()
+if __name__ == '__main__':
+    root = tk.Tk()
+    app = DataProcessorApp(root)
+    root.mainloop()
