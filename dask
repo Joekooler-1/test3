@@ -30,10 +30,17 @@ def load_relevant_cdr_rows(cdr_file_path, required_values):
 
     for chunk in cdr_iterator:
         filtered_chunk = chunk[chunk['J'].isin(required_values)]
-        cdr_filtered_chunks.append(filtered_chunk)
+        
+        # Add only non-empty, non-all-NA filtered chunks
+        if not filtered_chunk.empty and not filtered_chunk.isna().all(axis=None):
+            cdr_filtered_chunks.append(filtered_chunk)
 
-    # Concatenate all filtered chunks into a single DataFrame and set index for merging
-    cdr_df = pd.concat(cdr_filtered_chunks).set_index('J')
+    # Concatenate all filtered chunks into a single DataFrame, only if non-empty chunks are present
+    if cdr_filtered_chunks:
+        cdr_df = pd.concat(cdr_filtered_chunks).set_index('J')
+    else:
+        cdr_df = pd.DataFrame(columns=cdr_columns).set_index('J')  # Return empty DataFrame with correct columns if no rows match
+
     return cdr_df
 
 def process_single_feed_file(feed_file, cdr_df, output_file, close_value, progress_queue, cancel_flag):
@@ -234,4 +241,3 @@ if __name__ == '__main__':
     root = tk.Tk()
     app = DataProcessorApp(root)
     root.mainloop()
-
