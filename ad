@@ -3,8 +3,7 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 import numpy as np
 import os
-import multiprocessing as mp
-from multiprocessing import Queue
+import gc  # Import garbage collection module for explicit memory management
 
 def generate_column_names(num_columns):
     column_names = []
@@ -24,8 +23,8 @@ def load_cdr_file(cdr_file_path):
     return cdr_df
 
 def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
-    # Read feed file in chunks
-    chunk_size = 10000  # Adjust based on available memory
+    # Set a smaller chunk size to reduce memory usage
+    chunk_size = 2000  # Adjust to an appropriate size for your system's memory
     first_chunk = True
 
     for feed_chunk in pd.read_csv(feed_file, header=None, encoding='ISO-8859-1', chunksize=chunk_size):
@@ -40,9 +39,14 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
         numeric_cols = ['M', 'Y', 'Z', 'AE']
         merged_df[numeric_cols] = merged_df[numeric_cols].apply(pd.to_numeric, errors='coerce', downcast='float')
 
+        # Convert large, repeated text columns to categorical to save memory
+        merged_df['Product'] = 'Equity Derivatives'  # Assuming this is constant
+        merged_df['Product'] = merged_df['Product'].astype('category')
+        merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
+        merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
+        
         # Use numpy for vectorized calculations
         merged_df['Units'] = -np.asarray(merged_df['M'], dtype=np.float32)
-        merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
         merged_df['MTM (Local CCY)'] = (
             np.asarray(merged_df['Y'], dtype=np.float32) * 
             np.asarray(merged_df['Z'], dtype=np.float32) * 
@@ -55,7 +59,7 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
             Sent_Status="",
             Sent="",
             Error=np.where(merged_df['A_cdr'].isna(), "Error", ""),
-            Product="Equity Derivatives",
+            Product=merged_df['Product'],
             Name=merged_df['Z'],
             LEI=merged_df['Y'],
             AppandShortName="GLOBALBOOK|" + merged_df.index.astype(str),
@@ -93,7 +97,11 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
 
         # Append processed chunk to output CSV file incrementally
         output_df.to_csv(output_file, mode='a', index=False, header=first_chunk)
-        first_chunk = False
+        first_chunk = False  # After the first write, subsequent chunks will not write the header
+
+        # Explicitly delete processed data and run garbage collection
+        del feed_chunk, merged_df, output_df
+        gc.collect()
 
 class DataProcessorApp:
     def __init__(self, root):
