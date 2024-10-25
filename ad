@@ -16,12 +16,12 @@ def generate_column_names(num_columns):
     return column_names
 
 def load_cdr_file(cdr_file_path):
-    # Load only the needed columns with specific names for clarity
+    # Load only the needed columns from the CDR file, rename columns accordingly
     usecols = [9, 25, 24, 21, 5, 0, 2]  # Columns J, Z, Y, V, F, A, C
-    column_names = ['J', 'Name', 'LEI', 'Entity', 'Entity_ID', 'CDRID', 'Fund']
+    column_names = ['Client_arrangement_short_name', 'Highest_available_display_name', 'LEI', 'Entity', 'Entity_ID', 'CDRID', 'Fund']
     cdr_df = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None, usecols=usecols)
     cdr_df.columns = column_names
-    cdr_df.set_index('J', inplace=True)  # Set 'J' (Short_name) as the index for quick lookups
+    cdr_df.set_index('Client_arrangement_short_name', inplace=True)  # Set as the index for matching with GBL_BKID in feed file
     return cdr_df
 
 def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
@@ -32,10 +32,14 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
     for feed_chunk in pd.read_csv(feed_file, header=None, encoding='ISO-8859-1', chunksize=chunk_size):
         feed_columns = generate_column_names(feed_chunk.shape[1])
         feed_chunk.columns = feed_columns
-        feed_chunk.set_index('B', inplace=True)
+        feed_chunk.set_index('GBL_BKID', inplace=True)  # Set GBL_BKID as the index for matching with CDR
 
-        # Merge chunk with CDR data
+        # Merge chunk with CDR data based on GBL_BKID
         merged_df = feed_chunk.join(cdr_df, how='left', rsuffix='_cdr')
+        
+        # Verify if Highest_available_display_name and LEI columns exist after merging
+        if 'Highest_available_display_name' not in merged_df.columns or 'LEI' not in merged_df.columns:
+            print("Warning: 'Highest_available_display_name' or 'LEI' columns are missing after merge.")
 
         # Convert necessary columns to reduce memory
         numeric_cols = ['M', 'Y', 'Z', 'AE']
@@ -62,7 +66,7 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
             Sent="",
             Error=np.where(merged_df['CDRID'].isna(), "Error", ""),
             Product=merged_df['Product'],
-            Name=merged_df['Name'],
+            Name=merged_df['Highest_available_display_name'],  # Using updated column name
             LEI=merged_df['LEI'],
             AppandShortName="GLOBALBOOK|" + merged_df.index.astype(str),
             CDR_Application="GLOBALBOOK",
