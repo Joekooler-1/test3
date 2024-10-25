@@ -1,0 +1,147 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import pandas as pd
+import numpy as np
+import os
+
+class DataProcessorApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Data Processor")
+        
+        # File paths
+        self.feed_files = [None, None, None]  # To store paths of three feed files
+        self.cdr_file = None
+        self.output_file = None
+        
+        # UI Setup
+        tk.Label(root, text="Select Feed File 1").grid(row=0, column=0, padx=10, pady=5)
+        self.feed1_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(0))
+        self.feed1_btn.grid(row=0, column=1, padx=10, pady=5)
+        
+        tk.Label(root, text="Select Feed File 2").grid(row=1, column=0, padx=10, pady=5)
+        self.feed2_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(1))
+        self.feed2_btn.grid(row=1, column=1, padx=10, pady=5)
+        
+        tk.Label(root, text="Select Feed File 3").grid(row=2, column=0, padx=10, pady=5)
+        self.feed3_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(2))
+        self.feed3_btn.grid(row=2, column=1, padx=10, pady=5)
+        
+        tk.Label(root, text="Select CDR File").grid(row=3, column=0, padx=10, pady=5)
+        self.cdr_btn = tk.Button(root, text="Browse", command=self.select_cdr_file)
+        self.cdr_btn.grid(row=3, column=1, padx=10, pady=5)
+        
+        tk.Label(root, text="Save Output As").grid(row=4, column=0, padx=10, pady=5)
+        self.output_btn = tk.Button(root, text="Browse", command=self.select_output_file)
+        self.output_btn.grid(row=4, column=1, padx=10, pady=5)
+        
+        # Process Button
+        self.process_btn = tk.Button(root, text="Process Files", command=self.process_files)
+        self.process_btn.grid(row=5, column=0, columnspan=2, pady=20)
+        
+    def select_file(self, idx):
+        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        if file_path:
+            self.feed_files[idx] = file_path
+            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=idx, column=2)
+            
+    def select_cdr_file(self):
+        file_path = filedialog.askopenfilename(filetypes=[("PSV Files", "*.psv")])
+        if file_path:
+            self.cdr_file = file_path
+            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=3, column=2)
+    
+    def select_output_file(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
+        if file_path:
+            self.output_file = file_path
+            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=4, column=2)
+    
+    def process_files(self):
+        if not all(self.feed_files) or not self.cdr_file or not self.output_file:
+            messagebox.showerror("Error", "Please select all feed files, CDR file, and output file.")
+            return
+        
+        try:
+            # Read the CDR file
+            cdr_df = pd.read_csv(self.cdr_file, sep='|')
+            
+            # Prepare an empty list to store each processed feed file's DataFrame
+            combined_data = []
+            
+            # Process each feed file
+            for idx, feed_file in enumerate(self.feed_files, start=1):
+                feed_df = pd.read_csv(feed_file)
+                
+                # Process each row in the feed file based on its 'Short_name' in Column B
+                for _, feed_row in feed_df.iterrows():
+                    short_name = feed_row['B']  # Assuming Column B is labeled 'B' for 'Short_name'
+                    
+                    # Filter CDR rows where Column J matches the current Short_name
+                    cdr_filtered = cdr_df[cdr_df['J'] == short_name]
+                    
+                    # Handle cases where there may be no matching row in the CDR file
+                    if cdr_filtered.empty:
+                        error_value = "Error"  # Set error if no CDR row found
+                    else:
+                        error_value = ""
+                    
+                    # For each matching CDR entry, create an output row
+                    for _, cdr_row in cdr_filtered.iterrows():
+                        output_row = {
+                            "Sent Status": "",  # Leave blank
+                            "Sent": "",  # Leave blank
+                            "Error": error_value,  # Error logic
+                            "Product": "Equity Derivatives",
+                            "Name": cdr_row['Z'],
+                            "LEI": cdr_row['Y'],
+                            "AppandShortName": f"GLOBALBOOK|{short_name}",
+                            "CDR_Application": "GLOBALBOOK",
+                            "Short_name": short_name,
+                            "Entity": cdr_row['V'] if pd.notna(cdr_row['V']) else cdr_row['C'],
+                            "Entity_ID": cdr_row['F'],
+                            "CDRID": cdr_row['A'],
+                            "EQD_Client": feed_row['C'],
+                            "Trade ID": feed_row['F'],
+                            "RBC ID": "",
+                            "RBC Name": "",
+                            "RBC_shortname": "",
+                            "Fund": cdr_row['C'],
+                            "Trade date": feed_row['O'],
+                            "Maturity Date": feed_row['P'],
+                            "Sub Product": feed_row['H'],
+                            "EQD_DF_FLAG": "",  # Leave blank
+                            "EQD_SEC_FLAG": "TRUE" if feed_row['AM'] == 'Y' else "FALSE",
+                            "Underlying": "",  # No data specified yet
+                            "Units": -feed_row['M'],  # Negative value of 'Units'
+                            "Contract size": feed_row['Z'],
+                            "Call/put": feed_row['J'],
+                            "CCY": feed_row['K'],
+                            "Long/Short": feed_row['L'],
+                            "Adjustment": "",  # Leave blank
+                            "Unit Price (Local CCY)": feed_row['AJ'],
+                            "COB": "",  # Leave blank
+                            "Close": idx,  # Set based on file source (1, 2, or 3)
+                            "MTM (Local CCY)": feed_row['Y'] * feed_row['Z'] * feed_row['AE'],
+                            "MTM USD": "",  # Leave blank
+                            "Strategy": feed_row['U'],
+                            "Load Type": ""  # No data specified yet
+                        }
+                        
+                        # Append the output row to the combined data
+                        combined_data.append(output_row)
+            
+            # Convert the combined data into a DataFrame
+            final_df = pd.DataFrame(combined_data)
+            
+            # Output the final combined DataFrame to the specified output file
+            final_df.to_csv(self.output_file, index=False)
+            messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
+        
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {e}")
+
+# Run the application
+root = tk.Tk()
+app = DataProcessorApp(root)
+root.mainloop()
