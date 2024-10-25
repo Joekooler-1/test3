@@ -32,6 +32,7 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
     for feed_chunk in pd.read_csv(feed_file, header=None, encoding='ISO-8859-1', chunksize=chunk_size):
         feed_columns = generate_column_names(feed_chunk.shape[1])
         feed_chunk.columns = feed_columns
+        feed_chunk.rename(columns={'B': 'GBL_BKID'}, inplace=True)  # Rename column B to GBL_BKID
         feed_chunk.set_index('GBL_BKID', inplace=True)  # Set GBL_BKID as the index for matching with CDR
 
         # Merge chunk with CDR data based on GBL_BKID
