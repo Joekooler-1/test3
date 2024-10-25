@@ -18,7 +18,7 @@ def generate_column_names(num_columns):
 def load_cdr_file(cdr_file_path):
     # Load CDR file as a Dask DataFrame with specified columns
     cdr_df = dd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', header=None)
-    cdr_columns = generate_column_names(cdr_df.shape[1].compute())
+    cdr_columns = generate_column_names(cdr_df.shape[1])  # Removed .compute() here
     cdr_df.columns = cdr_columns
     cdr_df = cdr_df.set_index('J')  # Set index on 'J' column for faster merging
     return cdr_df
@@ -26,7 +26,7 @@ def load_cdr_file(cdr_file_path):
 def process_single_feed_file(feed_file, cdr_df, output_file, close_value):
     # Load feed file as Dask DataFrame
     feed_df = dd.read_csv(feed_file, header=None, encoding='ISO-8859-1')
-    feed_columns = generate_column_names(feed_df.shape[1].compute())
+    feed_columns = generate_column_names(feed_df.shape[1])  # Removed .compute() here
     feed_df.columns = feed_columns
     feed_df = feed_df.set_index('B')  # Set index on 'B' for merging
 
