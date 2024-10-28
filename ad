@@ -5,16 +5,6 @@ import numpy as np
 import os
 import gc
 
-def generate_column_names(num_columns):
-    column_names = []
-    for i in range(1, num_columns + 1):
-        name = ""
-        while i > 0:
-            i, remainder = divmod(i - 1, 26)
-            name = chr(65 + remainder) + name
-        column_names.append(name)
-    return column_names
-
 def load_cdr_file(cdr_file_path):
     # Load only the needed columns from the CDR file, rename columns accordingly
     usecols = [0, 9, 25, 24, 21, 5, 2]  # Columns A, J, Z, Y, V, F, C
@@ -24,28 +14,17 @@ def load_cdr_file(cdr_file_path):
     cdr_df.set_index('Client_arrangement_short_name', inplace=True)  # Set as the index for matching with GBL_BKID in feed file
     return cdr_df
 
-def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged_dir):
-    # Set a smaller chunk size to reduce memory usage
+def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged_dir, output_columns):
     chunk_size = 2000
     first_chunk = True
     merged_output_path = os.path.join(merged_dir, f"merged_{os.path.basename(feed_file)}")
 
-    for feed_chunk in pd.read_csv(feed_file, header=None, encoding='ISO-8859-1', chunksize=chunk_size):
-        feed_columns = generate_column_names(feed_chunk.shape[1])
-        feed_chunk.columns = feed_columns
-        feed_chunk.rename(columns={'B': 'GBL_BKID'}, inplace=True)  # Rename column B to GBL_BKID
-        feed_chunk.set_index('GBL_BKID', inplace=True)  # Set GBL_BKID as the index for matching with CDR
+    for feed_chunk in pd.read_csv(feed_file, encoding='ISO-8859-1', chunksize=chunk_size):
+        # Set GBL_BKID as the index for matching with CDR
+        feed_chunk.set_index('GBL_BKID', inplace=True)  
 
         # Merge chunk with CDR data based on GBL_BKID
         merged_df = feed_chunk.join(cdr_df, how='left', rsuffix='_cdr')
-        
-        # Verify if Highest_available_display_name, LEI, and CDRID columns exist after merging
-        if 'Highest_available_display_name' not in merged_df.columns or 'LEI' not in merged_df.columns or 'CDRID' not in merged_df.columns:
-            print("Warning: One of 'Highest_available_display_name', 'LEI', or 'CDRID' columns is missing after merge.")
-
-        # Convert necessary columns to reduce memory
-        numeric_cols = ['M', 'Y', 'Z', 'AE']
-        merged_df[numeric_cols] = merged_df[numeric_cols].apply(pd.to_numeric, errors='coerce', downcast='float')
 
         # Save a copy of the merged DataFrame to the specified merged directory
         merged_df.to_csv(merged_output_path, mode='a', index=True, header=first_chunk)
@@ -65,58 +44,10 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
         )
         merged_df['Close'] = close_value
 
-        # Collect output columns and ensure only the required 37 columns are included
-        output_df = merged_df.assign(
-            Sent_Status="",
-            Sent="",
-            Error=np.where(merged_df['CDRID'].isna(), "Error", ""),
-            Product=merged_df['Product'],
-            Name=merged_df['Highest_available_display_name'],
-            LEI=merged_df['LEI'],
-            AppandShortName="GLOBALBOOK|" + merged_df.index.astype(str),
-            CDR_Application="GLOBALBOOK",
-            Short_name=merged_df.index,
-            Entity=np.where(merged_df['Entity'].notna(), merged_df['Entity'], merged_df['C']),
-            Entity_ID=merged_df['Entity_ID'],
-            CDRID=merged_df['CDRID'],
-            EQD_Client=merged_df['C'],
-            Trade_ID=merged_df['F'],
-            RBC_ID="",
-            RBC_Name="",
-            RBC_shortname="",
-            Fund=merged_df['Fund'],
-            Trade_date=merged_df['O'],
-            Maturity_Date=merged_df['P'],
-            Sub_Product=merged_df['H'],
-            EQD_DF_FLAG="",
-            EQD_SEC_FLAG=merged_df['EQD_SEC_FLAG'],
-            Underlying="",
-            Units=merged_df['Units'],
-            Contract_size=merged_df['Z'],
-            Call_put=merged_df['J'],
-            CCY=merged_df['K'],
-            Long_Short=merged_df['L'],
-            Adjustment="",
-            Unit_Price_Local_CCY=merged_df['AJ'],
-            COB="",
-            Close=merged_df['Close'],
-            MTM_Local_CCY=merged_df['MTM (Local CCY)'],
-            MTM_USD="",
-            Strategy=merged_df['U'],
-            Load_Type=""
-        )
-
-        # Define the exact order of the 37 output columns
-        output_columns = [
-            'Sent_Status', 'Sent', 'Error', 'Product', 'Name', 'LEI', 'AppandShortName', 'CDR_Application',
-            'Short_name', 'Entity', 'Entity_ID', 'CDRID', 'EQD_Client', 'Trade_ID', 'RBC_ID', 'RBC_Name', 
-            'RBC_shortname', 'Fund', 'Trade_date', 'Maturity_Date', 'Sub_Product', 'EQD_DF_FLAG', 'EQD_SEC_FLAG',
-            'Underlying', 'Units', 'Contract_size', 'Call_put', 'CCY', 'Long_Short', 'Adjustment', 
-            'Unit_Price_Local_CCY', 'COB', 'Close', 'MTM_Local_CCY', 'MTM_USD', 'Strategy', 'Load_Type'
-        ]
-
-        # Select only the 37 columns and write them to the output file
-        output_df = output_df[output_columns]
+        # Define the output DataFrame with the custom columns
+        output_df = merged_df[output_columns].copy()
+        
+        # Write output DataFrame to the final output file
         output_df.to_csv(output_file, mode='a', index=False, header=first_chunk)
         first_chunk = False  # After the first write, subsequent chunks will not write the header
 
@@ -134,6 +65,13 @@ class DataProcessorApp:
         self.cdr_file = None
         self.output_file = None
         self.merged_dir = None
+        self.output_columns = [
+            'Sent_Status', 'Sent', 'Error', 'Product', 'Name', 'LEI', 'AppandShortName', 'CDR_Application',
+            'Short_name', 'Entity', 'Entity_ID', 'CDRID', 'EQD_Client', 'Trade_ID', 'RBC_ID', 'RBC_Name', 
+            'RBC_shortname', 'Fund', 'Trade_date', 'Maturity_Date', 'Sub_Product', 'EQD_DF_FLAG', 'EQD_SEC_FLAG',
+            'Underlying', 'Units', 'Contract_size', 'Call_put', 'CCY', 'Long_Short', 'Adjustment', 
+            'Unit_Price_Local_CCY', 'COB', 'Close', 'MTM_Local_CCY', 'MTM_USD', 'Strategy', 'Load_Type'
+        ]
         
         # UI Setup
         tk.Label(root, text="Select Feed File 1").grid(row=0, column=0, padx=10, pady=5)
@@ -199,7 +137,7 @@ class DataProcessorApp:
 
             # Process each feed file in chunks and append to output file
             for i, feed_file in enumerate(self.feed_files, start=1):
-                process_single_feed_file(feed_file, cdr_df, self.output_file, i, self.merged_dir)
+                process_single_feed_file(feed_file, cdr_df, self.output_file, i, self.merged_dir, self.output_columns)
             
             messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
         
