@@ -1,0 +1,110 @@
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog, messagebox
+
+def merge_feeds(feed_files, cdr_file, output_file, feed_merge_col='B', cdr_merge_col='I', selected_columns_indices=None):
+    """
+    Merges multiple feed files with a CDR file based on specified column matches.
+
+    Parameters:
+    - feed_files (list of str): Paths to the feed files to merge.
+    - cdr_file (str): Path to the CDR file (.psv).
+    - output_file (str): Path to save the merged result.
+    - feed_merge_col (str): Column in feed files to merge on.
+    - cdr_merge_col (str): Column in CDR file to merge on.
+    - selected_columns_indices (list of int, optional): List of column indices to select from the CDR file.
+    
+    Returns:
+    - None: Saves the merged result to `output_file`.
+    """
+    
+    # Read the CDR file and select specific columns by index
+    cdr_data = pd.read_csv(cdr_file, sep='|', usecols=selected_columns_indices + [cdr_merge_col])
+    
+    # Rename CDR merge column to a common name for merging
+    cdr_data = cdr_data.rename(columns={cdr_merge_col: 'merge_col'})
+
+    # Initialize an empty DataFrame to store cumulative results
+    merged_result = pd.DataFrame()
+
+    # Process each feed file
+    for feed_file in feed_files:
+        # Read each feed file
+        feed_data = pd.read_csv(feed_file)
+        
+        # Rename feed merge column to a common name for merging
+        feed_data = feed_data.rename(columns={feed_merge_col: 'merge_col'})
+        
+        # Merge with the CDR data
+        merged_data = feed_data.merge(cdr_data, on='merge_col', how='inner')
+        
+        # Append to cumulative result
+        merged_result = pd.concat([merged_result, merged_data], ignore_index=True)
+    
+    # Save the merged result to the output file
+    merged_result.to_csv(output_file, index=False)
+    
+    print(f"Merged file saved to {output_file}")
+    messagebox.showinfo("Success", f"Merged file saved to {output_file}")
+
+def select_files(entry_widget):
+    files = filedialog.askopenfilenames(filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+    entry_widget.delete(0, tk.END)
+    entry_widget.insert(0, ';'.join(files))
+
+def select_file(entry_widget):
+    file = filedialog.askopenfilename(filetypes=[("PSV files", "*.psv"), ("All files", "*.*")])
+    entry_widget.delete(0, tk.END)
+    entry_widget.insert(0, file)
+
+def select_output_file(entry_widget):
+    file = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
+    entry_widget.delete(0, tk.END)
+    entry_widget.insert(0, file)
+
+def run_merge():
+    feed_files = feeds_entry.get().split(';')
+    cdr_file = cdr_entry.get()
+    output_file = output_entry.get()
+    selected_columns_indices = [0, 2, 5, 6, 9, 21, 24, 25]
+    
+    if not feed_files or not cdr_file or not output_file:
+        messagebox.showwarning("Input Error", "Please select all necessary files and specify output.")
+        return
+    
+    try:
+        merge_feeds(feed_files, cdr_file, output_file, selected_columns_indices=selected_columns_indices)
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+# Tkinter GUI setup
+root = tk.Tk()
+root.title("Feed Merger Tool")
+
+# Feed Files Selection
+tk.Label(root, text="Select Feed Files:").grid(row=0, column=0, padx=10, pady=10, sticky='e')
+feeds_entry = tk.Entry(root, width=50)
+feeds_entry.grid(row=0, column=1, padx=10, pady=10)
+feeds_button = tk.Button(root, text="Browse", command=lambda: select_files(feeds_entry))
+feeds_button.grid(row=0, column=2, padx=10, pady=10)
+
+# CDR File Selection
+tk.Label(root, text="Select CDR File:").grid(row=1, column=0, padx=10, pady=10, sticky='e')
+cdr_entry = tk.Entry(root, width=50)
+cdr_entry.grid(row=1, column=1, padx=10, pady=10)
+cdr_button = tk.Button(root, text="Browse", command=lambda: select_file(cdr_entry))
+cdr_button.grid(row=1, column=2, padx=10, pady=10)
+
+# Output File Selection
+tk.Label(root, text="Output File:").grid(row=2, column=0, padx=10, pady=10, sticky='e')
+output_entry = tk.Entry(root, width=50)
+output_entry.grid(row=2, column=1, padx=10, pady=10)
+output_button = tk.Button(root, text="Browse", command=lambda: select_output_file(output_entry))
+output_button.grid(row=2, column=2, padx=10, pady=10)
+
+# Merge Button
+merge_button = tk.Button(root, text="Merge Files", command=run_merge)
+merge_button.grid(row=3, column=0, columnspan=3, pady=20)
+
+# Run the Tkinter event loop
+root.mainloop()
