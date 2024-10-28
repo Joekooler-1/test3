@@ -10,8 +10,8 @@ def load_cdr_file(cdr_file_path):
     usecols = [0, 9, 25, 24, 21, 5, 2]  # Columns by index
     cdr_df = pd.read_csv(cdr_file_path, sep='|', encoding='ISO-8859-1', usecols=usecols)
     
-    # Set the index to the 10th column (index 9)
-    cdr_df.set_index(cdr_df.columns[1], inplace=True)  # Set index to the column at index 9
+    # Set the index to column 9 (second column in the selected usecols)
+    cdr_df.set_index(cdr_df.columns[1], inplace=True)
     
     return cdr_df
 
@@ -56,44 +56,44 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
         )
         merged_df['Close'] = close_value
 
-        # Collect output columns and ensure only the required 37 columns are included
+        # Assign all output columns to blank values
         output_df = merged_df.assign(
             Sent_Status="",
             Sent="",
-            Error=np.where(merged_df['CDRID'].isna(), "Error", ""),
-            Product=merged_df['Product'],
-            Name=merged_df['Highest_available_display_name'],
-            LEI=merged_df['LEI'],
-            AppandShortName="GLOBALBOOK|" + merged_df.index.astype(str),
-            CDR_Application="GLOBALBOOK",
-            Short_name=merged_df.index,
-            Entity=np.where(merged_df['Entity'].notna(), merged_df['Entity'], merged_df['C']),
-            Entity_ID=merged_df['Entity_ID'],
-            CDRID=merged_df['CDRID'],
-            EQD_Client=merged_df['C'],
-            Trade_ID=merged_df['F'],
+            Error="",
+            Product="",
+            Name="",
+            LEI="",
+            AppandShortName="",
+            CDR_Application="",
+            Short_name="",
+            Entity="",
+            Entity_ID="",
+            CDRID="",
+            EQD_Client="",
+            Trade_ID="",
             RBC_ID="",
             RBC_Name="",
             RBC_shortname="",
-            Fund=merged_df['Fund'],
-            Trade_date=merged_df['O'],
-            Maturity_Date=merged_df['P'],
-            Sub_Product=merged_df['H'],
+            Fund="",
+            Trade_date="",
+            Maturity_Date="",
+            Sub_Product="",
             EQD_DF_FLAG="",
-            EQD_SEC_FLAG=merged_df['EQD_SEC_FLAG'],
+            EQD_SEC_FLAG="",
             Underlying="",
-            Units=merged_df['Units'],
-            Contract_size=merged_df['Z'],
-            Call_put=merged_df['J'],
-            CCY=merged_df['K'],
-            Long_Short=merged_df['L'],
+            Units="",
+            Contract_size="",
+            Call_put="",
+            CCY="",
+            Long_Short="",
             Adjustment="",
-            Unit_Price_Local_CCY=merged_df['AJ'],
+            Unit_Price_Local_CCY="",
             COB="",
-            Close=merged_df['Close'],
-            MTM_Local_CCY=merged_df['MTM (Local CCY)'],
+            Close="",
+            MTM_Local_CCY="",
             MTM_USD="",
-            Strategy=merged_df['U'],
+            Strategy="",
             Load_Type=""
         )
 
@@ -115,4 +115,90 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
         del feed_chunk, merged_df, output_df
         gc.collect()
 
-# Remaining class and GUI setup as before
+class DataProcessorApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Data Processor")
+        
+        # File paths
+        self.feed_files = [None, None, None]
+        self.cdr_file = None
+        self.output_file = None
+        self.merged_dir = None
+        
+        # UI Setup
+        tk.Label(root, text="Select Feed File 1").grid(row=0, column=0, padx=10, pady=5)
+        self.feed1_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(0))
+        self.feed1_btn.grid(row=0, column=1, padx=10, pady=5)
+        
+        tk.Label(root, text="Select Feed File 2").grid(row=1, column=0, padx=10, pady=5)
+        self.feed2_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(1))
+        self.feed2_btn.grid(row=1, column=1, padx=10, pady=5)
+        
+        tk.Label(root, text="Select Feed File 3").grid(row=2, column=0, padx=10, pady=5)
+        self.feed3_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(2))
+        self.feed3_btn.grid(row=2, column=1, padx=10, pady=5)
+        
+        tk.Label(root, text="Select CDR File").grid(row=3, column=0, padx=10, pady=5)
+        self.cdr_btn = tk.Button(root, text="Browse", command=self.select_cdr_file)
+        self.cdr_btn.grid(row=3, column=1, padx=10, pady=5)
+        
+        tk.Label(root, text="Save Output As").grid(row=4, column=0, padx=10, pady=5)
+        self.output_btn = tk.Button(root, text="Browse", command=self.select_output_file)
+        self.output_btn.grid(row=4, column=1, padx=10, pady=5)
+
+        tk.Label(root, text="Save Merged Files To").grid(row=5, column=0, padx=10, pady=5)
+        self.merged_btn = tk.Button(root, text="Browse", command=self.select_merged_dir)
+        self.merged_btn.grid(row=5, column=1, padx=10, pady=5)
+        
+        # Process Button
+        self.process_btn = tk.Button(root, text="Process Files", command=self.process_files)
+        self.process_btn.grid(row=6, column=0, columnspan=2, pady=20)
+    
+    def select_file(self, idx):
+        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        if file_path:
+            self.feed_files[idx] = file_path
+            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=idx, column=2)
+    
+    def select_cdr_file(self):
+        file_path = filedialog.askopenfilename(filetypes=[("PSV Files", "*.psv")])
+        if file_path:
+            self.cdr_file = file_path
+            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=3, column=2)
+    
+    def select_output_file(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
+        if file_path:
+            self.output_file = file_path
+            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=4, column=2)
+
+    def select_merged_dir(self):
+        directory = filedialog.askdirectory()
+        if directory:
+            self.merged_dir = directory
+            tk.Label(self.root, text=os.path.basename(directory)).grid(row=5, column=2)
+
+    def process_files(self):
+        if not all(self.feed_files) or not self.cdr_file or not self.output_file or not self.merged_dir:
+            messagebox.showerror("Error", "Please select all feed files, CDR file, output file, and merged directory.")
+            return
+        
+        try:
+            # Load CDR file once and use it for all feed files
+            cdr_df = load_cdr_file(self.cdr_file)
+
+            # Process each feed file in chunks and append to output file
+            for i, feed_file in enumerate(self.feed_files, start=1):
+                process_single_feed_file(feed_file, cdr_df, self.output_file, i, self.merged_dir)
+            
+            messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
+        
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {e}")
+
+# Run the application
+if __name__ == '__main__':
+    root = tk.Tk()
+    app = DataProcessorApp(root)
+    root.mainloop()
