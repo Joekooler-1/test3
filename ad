@@ -32,8 +32,13 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
         # Convert large, repeated text columns to categorical to save memory
         merged_df['Product'] = 'Equity Derivatives'
         merged_df['Product'] = merged_df['Product'].astype('category')
-        merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
-        merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
+        
+        # Check if 'AM' column exists before using it
+        if 'AM' in merged_df.columns:
+            merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
+            merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
+        else:
+            merged_df['EQD_SEC_FLAG'] = False  # Default value if 'AM' does not exist
         
         # Use numpy for vectorized calculations
         merged_df['Units'] = -np.asarray(merged_df['M'], dtype=np.float32)
