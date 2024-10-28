@@ -35,14 +35,20 @@ def merge_feed_file(feed_file, cdr_df, close_value, output_columns):
             merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
         else:
             merged_df['EQD_SEC_FLAG'] = False  # Default value if 'AM' does not exist
-        
-        # Use numpy for vectorized calculations
-        merged_df['Units'] = -np.asarray(merged_df['M'], dtype=np.float32)
-        merged_df['MTM (Local CCY)'] = (
-            np.asarray(merged_df['Y'], dtype=np.float32) * 
-            np.asarray(merged_df['Z'], dtype=np.float32) * 
-            np.asarray(merged_df['AE'], dtype=np.float32)
-        )
+
+        # Check if 'M', 'Y', 'Z', and 'AE' columns exist before calculations
+        if all(col in merged_df.columns for col in ['M', 'Y', 'Z', 'AE']):
+            merged_df['Units'] = -np.asarray(merged_df['M'], dtype=np.float32)
+            merged_df['MTM (Local CCY)'] = (
+                np.asarray(merged_df['Y'], dtype=np.float32) * 
+                np.asarray(merged_df['Z'], dtype=np.float32) * 
+                np.asarray(merged_df['AE'], dtype=np.float32)
+            )
+        else:
+            # Set default values if any columns are missing
+            merged_df['Units'] = np.nan
+            merged_df['MTM (Local CCY)'] = np.nan
+
         merged_df['Close'] = close_value
 
         # Select only the required columns for output
