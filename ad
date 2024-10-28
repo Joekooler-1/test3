@@ -34,10 +34,14 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
         # Merge chunk with CDR data based on GBL_BKID
         merged_df = feed_chunk.join(cdr_df, how='left', rsuffix='_cdr')
         
-        # Convert necessary columns to reduce memory
-        numeric_cols = ['M', 'Y', 'Z', 'AE']
-        merged_df[numeric_cols] = merged_df[numeric_cols].apply(pd.to_numeric, errors='coerce', downcast='float')
-
+        # Define required numeric columns by index
+        required_numeric_indices = [12, 24, 25, 30]  # Indices for columns 'M', 'Y', 'Z', 'AE'
+        numeric_col_names = [feed_columns[i] for i in required_numeric_indices if i < len(feed_columns)]
+        
+        # Convert only available numeric columns to reduce memory
+        if numeric_col_names:
+            merged_df[numeric_col_names] = merged_df[numeric_col_names].apply(pd.to_numeric, errors='coerce', downcast='float')
+        
         # Save a copy of the merged DataFrame to the specified merged directory
         merged_df.to_csv(merged_output_path, mode='a', index=True, header=first_chunk)
         
@@ -47,13 +51,14 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
         merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
         merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
         
-        # Use numpy for vectorized calculations
-        merged_df['Units'] = -np.asarray(merged_df['M'], dtype=np.float32)
-        merged_df['MTM (Local CCY)'] = (
-            np.asarray(merged_df['Y'], dtype=np.float32) * 
-            np.asarray(merged_df['Z'], dtype=np.float32) * 
-            np.asarray(merged_df['AE'], dtype=np.float32)
-        )
+        # Use numpy for vectorized calculations if columns are available
+        if all(i < len(feed_columns) for i in required_numeric_indices):
+            merged_df['Units'] = -np.asarray(merged_df[feed_columns[12]], dtype=np.float32)
+            merged_df['MTM (Local CCY)'] = (
+                np.asarray(merged_df[feed_columns[24]], dtype=np.float32) * 
+                np.asarray(merged_df[feed_columns[25]], dtype=np.float32) * 
+                np.asarray(merged_df[feed_columns[30]], dtype=np.float32)
+            )
         merged_df['Close'] = close_value
 
         # Assign all output columns to blank values
