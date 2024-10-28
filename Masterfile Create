@@ -57,14 +57,25 @@ class DataMergerApp:
             return
         
         try:
-            # Load the PSV file with selected columns only, specifying an encoding
+            # Load the PSV file with selected columns only, specifying a pipe delimiter
             psv_data = pd.read_csv(self.psv_file, sep="|", usecols=[0, 2, 5, 9, 21, 24, 25], encoding="ISO-8859-1")
+            
+            # Standardize column names for the PSV file for easy reference
+            psv_data.columns = ["col_0", "col_2", "col_5", "col_9", "col_21", "col_24", "col_25"]
+            
+            # Clean the matching column in the PSV file to remove leading/trailing spaces and normalize case
+            psv_data["col_9"] = psv_data["col_9"].astype(str).str.strip().str.lower()
             
             # Merge each feed file with the PSV file based on the matching criteria
             merged_data = []
             for feed_file in self.feed_files:
                 feed_data = pd.read_csv(feed_file, encoding="ISO-8859-1")
-                merged = feed_data.merge(psv_data, left_on=feed_data.columns[0], right_on=psv_data.columns[3], how="left")
+                
+                # Clean the second column in the feed file and set it as the key
+                feed_data[feed_data.columns[1]] = feed_data[feed_data.columns[1]].astype(str).str.strip().str.lower()
+                
+                # Perform the merge using the second column of the feed file and col_9 of the PSV file
+                merged = feed_data.merge(psv_data, left_on=feed_data.columns[1], right_on="col_9", how="left")
                 merged_data.append(merged)
             
             # Combine all merged data into a single DataFrame
