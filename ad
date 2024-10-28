@@ -1,9 +1,19 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox
 import pandas as pd
 import numpy as np
 import os
 import gc
+
+def generate_column_names(num_columns):
+    column_names = []
+    for i in range(1, num_columns + 1):
+        name = ""
+        while i > 0:
+            i, remainder = divmod(i - 1, 26)
+            name = chr(65 + remainder) + name
+        column_names.append(name)
+    return column_names
 
 def load_cdr_file(cdr_file_path):
     # Load only the needed columns from the CDR file, rename columns accordingly
@@ -14,49 +24,105 @@ def load_cdr_file(cdr_file_path):
     cdr_df.set_index('Client_arrangement_short_name', inplace=True)  # Set as the index for matching with GBL_BKID in feed file
     return cdr_df
 
-def merge_feed_file(feed_file, cdr_df, close_value, output_columns):
+def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged_dir):
+    # Set a smaller chunk size to reduce memory usage
     chunk_size = 2000
-    merged_data = []  # Collect merged data for preview
+    first_chunk = True
+    merged_output_path = os.path.join(merged_dir, f"merged_{os.path.basename(feed_file)}")
 
-    for feed_chunk in pd.read_csv(feed_file, encoding='ISO-8859-1', chunksize=chunk_size):
-        # Set GBL_BKID as the index for matching with CDR
-        feed_chunk.set_index('GBL_BKID', inplace=True)  
+    for feed_chunk in pd.read_csv(feed_file, header=None, encoding='ISO-8859-1', chunksize=chunk_size):
+        feed_columns = generate_column_names(feed_chunk.shape[1])
+        feed_chunk.columns = feed_columns
+        feed_chunk.rename(columns={'B': 'GBL_BKID'}, inplace=True)  # Rename column B to GBL_BKID
+        feed_chunk.set_index('GBL_BKID', inplace=True)  # Set GBL_BKID as the index for matching with CDR
 
         # Merge chunk with CDR data based on GBL_BKID
         merged_df = feed_chunk.join(cdr_df, how='left', rsuffix='_cdr')
+        
+        # Verify if Highest_available_display_name, LEI, and CDRID columns exist after merging
+        if 'Highest_available_display_name' not in merged_df.columns or 'LEI' not in merged_df.columns or 'CDRID' not in merged_df.columns:
+            print("Warning: One of 'Highest_available_display_name', 'LEI', or 'CDRID' columns is missing after merge.")
 
+        # Convert necessary columns to reduce memory
+        numeric_cols = ['M', 'Y', 'Z', 'AE']
+        merged_df[numeric_cols] = merged_df[numeric_cols].apply(pd.to_numeric, errors='coerce', downcast='float')
+
+        # Save a copy of the merged DataFrame to the specified merged directory
+        merged_df.to_csv(merged_output_path, mode='a', index=True, header=first_chunk)
+        
         # Convert large, repeated text columns to categorical to save memory
         merged_df['Product'] = 'Equity Derivatives'
         merged_df['Product'] = merged_df['Product'].astype('category')
+        merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
+        merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
         
-        # Check if 'AM' column exists before using it
-        if 'AM' in merged_df.columns:
-            merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
-            merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
-        else:
-            merged_df['EQD_SEC_FLAG'] = False  # Default value if 'AM' does not exist
-
-        # Check if 'M', 'Y', 'Z', and 'AE' columns exist before calculations
-        if all(col in merged_df.columns for col in ['M', 'Y', 'Z', 'AE']):
-            merged_df['Units'] = -np.asarray(merged_df['M'], dtype=np.float32)
-            merged_df['MTM (Local CCY)'] = (
-                np.asarray(merged_df['Y'], dtype=np.float32) * 
-                np.asarray(merged_df['Z'], dtype=np.float32) * 
-                np.asarray(merged_df['AE'], dtype=np.float32)
-            )
-        else:
-            # Set default values if any columns are missing
-            merged_df['Units'] = np.nan
-            merged_df['MTM (Local CCY)'] = np.nan
-
+        # Use numpy for vectorized calculations
+        merged_df['Units'] = -np.asarray(merged_df['M'], dtype=np.float32)
+        merged_df['MTM (Local CCY)'] = (
+            np.asarray(merged_df['Y'], dtype=np.float32) * 
+            np.asarray(merged_df['Z'], dtype=np.float32) * 
+            np.asarray(merged_df['AE'], dtype=np.float32)
+        )
         merged_df['Close'] = close_value
 
-        # Select only the required columns for output
-        output_df = merged_df[output_columns].copy()
-        merged_data.append(output_df)  # Collect for preview
+        # Collect output columns and ensure only the required 37 columns are included
+        output_df = merged_df.assign(
+            Sent_Status="",
+            Sent="",
+            Error=np.where(merged_df['CDRID'].isna(), "Error", ""),
+            Product=merged_df['Product'],
+            Name=merged_df['Highest_available_display_name'],
+            LEI=merged_df['LEI'],
+            AppandShortName="GLOBALBOOK|" + merged_df.index.astype(str),
+            CDR_Application="GLOBALBOOK",
+            Short_name=merged_df.index,
+            Entity=np.where(merged_df['Entity'].notna(), merged_df['Entity'], merged_df['C']),
+            Entity_ID=merged_df['Entity_ID'],
+            CDRID=merged_df['CDRID'],
+            EQD_Client=merged_df['C'],
+            Trade_ID=merged_df['F'],
+            RBC_ID="",
+            RBC_Name="",
+            RBC_shortname="",
+            Fund=merged_df['Fund'],
+            Trade_date=merged_df['O'],
+            Maturity_Date=merged_df['P'],
+            Sub_Product=merged_df['H'],
+            EQD_DF_FLAG="",
+            EQD_SEC_FLAG=merged_df['EQD_SEC_FLAG'],
+            Underlying="",
+            Units=merged_df['Units'],
+            Contract_size=merged_df['Z'],
+            Call_put=merged_df['J'],
+            CCY=merged_df['K'],
+            Long_Short=merged_df['L'],
+            Adjustment="",
+            Unit_Price_Local_CCY=merged_df['AJ'],
+            COB="",
+            Close=merged_df['Close'],
+            MTM_Local_CCY=merged_df['MTM (Local CCY)'],
+            MTM_USD="",
+            Strategy=merged_df['U'],
+            Load_Type=""
+        )
 
-    # Concatenate all chunks for preview
-    return pd.concat(merged_data)
+        # Define the exact order of the 37 output columns
+        output_columns = [
+            'Sent_Status', 'Sent', 'Error', 'Product', 'Name', 'LEI', 'AppandShortName', 'CDR_Application',
+            'Short_name', 'Entity', 'Entity_ID', 'CDRID', 'EQD_Client', 'Trade_ID', 'RBC_ID', 'RBC_Name', 
+            'RBC_shortname', 'Fund', 'Trade_date', 'Maturity_Date', 'Sub_Product', 'EQD_DF_FLAG', 'EQD_SEC_FLAG',
+            'Underlying', 'Units', 'Contract_size', 'Call_put', 'CCY', 'Long_Short', 'Adjustment', 
+            'Unit_Price_Local_CCY', 'COB', 'Close', 'MTM_Local_CCY', 'MTM_USD', 'Strategy', 'Load_Type'
+        ]
+
+        # Select only the 37 columns and write them to the output file
+        output_df = output_df[output_columns]
+        output_df.to_csv(output_file, mode='a', index=False, header=first_chunk)
+        first_chunk = False  # After the first write, subsequent chunks will not write the header
+
+        # Explicitly delete processed data and run garbage collection
+        del feed_chunk, merged_df, output_df
+        gc.collect()
 
 class DataProcessorApp:
     def __init__(self, root):
@@ -68,13 +134,6 @@ class DataProcessorApp:
         self.cdr_file = None
         self.output_file = None
         self.merged_dir = None
-        self.output_columns = [
-            'Sent_Status', 'Sent', 'Error', 'Product', 'Name', 'LEI', 'AppandShortName', 'CDR_Application',
-            'Short_name', 'Entity', 'Entity_ID', 'CDRID', 'EQD_Client', 'Trade_ID', 'RBC_ID', 'RBC_Name', 
-            'RBC_shortname', 'Fund', 'Trade_date', 'Maturity_Date', 'Sub_Product', 'EQD_DF_FLAG', 'EQD_SEC_FLAG',
-            'Underlying', 'Units', 'Contract_size', 'Call_put', 'CCY', 'Long_Short', 'Adjustment', 
-            'Unit_Price_Local_CCY', 'COB', 'Close', 'MTM_Local_CCY', 'MTM_USD', 'Strategy', 'Load_Type'
-        ]
         
         # UI Setup
         tk.Label(root, text="Select Feed File 1").grid(row=0, column=0, padx=10, pady=5)
@@ -100,19 +159,11 @@ class DataProcessorApp:
         tk.Label(root, text="Save Merged Files To").grid(row=5, column=0, padx=10, pady=5)
         self.merged_btn = tk.Button(root, text="Browse", command=self.select_merged_dir)
         self.merged_btn.grid(row=5, column=1, padx=10, pady=5)
-
-        # Preview Button
-        self.preview_btn = tk.Button(root, text="Preview Merged Data", command=self.preview_merged_data)
-        self.preview_btn.grid(row=6, column=0, columnspan=2, pady=20)
-
+        
         # Process Button
-        self.process_btn = tk.Button(root, text="Process and Save Output", command=self.process_files)
-        self.process_btn.grid(row=7, column=0, columnspan=2, pady=20)
-
-        # Preview Display
-        self.preview_text = scrolledtext.ScrolledText(root, width=100, height=20)
-        self.preview_text.grid(row=8, column=0, columnspan=2, padx=10, pady=10)
-
+        self.process_btn = tk.Button(root, text="Process Files", command=self.process_files)
+        self.process_btn.grid(row=6, column=0, columnspan=2, pady=20)
+    
     def select_file(self, idx):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if file_path:
@@ -137,26 +188,6 @@ class DataProcessorApp:
             self.merged_dir = directory
             tk.Label(self.root, text=os.path.basename(directory)).grid(row=5, column=2)
 
-    def preview_merged_data(self):
-        if not all(self.feed_files) or not self.cdr_file:
-            messagebox.showerror("Error", "Please select all feed files and the CDR file.")
-            return
-        
-        try:
-            # Load CDR file once
-            cdr_df = load_cdr_file(self.cdr_file)
-            self.preview_text.delete(1.0, tk.END)  # Clear previous preview
-
-            # Process and preview each feed file
-            for i, feed_file in enumerate(self.feed_files, start=1):
-                merged_data = merge_feed_file(feed_file, cdr_df, i, self.output_columns)
-                self.preview_text.insert(tk.END, f"--- Merged Data for Feed File {i} ({os.path.basename(feed_file)}) ---\n")
-                self.preview_text.insert(tk.END, merged_data.head().to_string())
-                self.preview_text.insert(tk.END, "\n\n")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"An error occurred: {e}")
-
     def process_files(self):
         if not all(self.feed_files) or not self.cdr_file or not self.output_file or not self.merged_dir:
             messagebox.showerror("Error", "Please select all feed files, CDR file, output file, and merged directory.")
@@ -168,9 +199,8 @@ class DataProcessorApp:
 
             # Process each feed file in chunks and append to output file
             for i, feed_file in enumerate(self.feed_files, start=1):
-                merged_data = merge_feed_file(feed_file, cdr_df, i, self.output_columns)
-                merged_data.to_csv(self.output_file, mode='a', index=False, header=(i == 1))  # Save output
-
+                process_single_feed_file(feed_file, cdr_df, self.output_file, i, self.merged_dir)
+            
             messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
         
         except Exception as e:
