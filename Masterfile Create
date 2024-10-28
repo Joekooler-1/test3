@@ -66,19 +66,21 @@ class DataMergerApp:
             # Clean the matching column in the PSV file to remove leading/trailing spaces and normalize case
             psv_data["col_9"] = psv_data["col_9"].astype(str).str.strip().str.lower()
             
-            # Merge each feed file with the PSV file based on the matching criteria
+            # Initialize an empty list to store merged chunks
             merged_data = []
+
+            # Process each feed file in chunks of 1000 rows
             for feed_file in self.feed_files:
-                feed_data = pd.read_csv(feed_file, encoding="ISO-8859-1")
-                
-                # Clean the second column in the feed file and set it as the key
-                feed_data[feed_data.columns[1]] = feed_data[feed_data.columns[1]].astype(str).str.strip().str.lower()
-                
-                # Perform the merge using the second column of the feed file and col_9 of the PSV file
-                merged = feed_data.merge(psv_data, left_on=feed_data.columns[1], right_on="col_9", how="left")
-                merged_data.append(merged)
+                feed_chunk_iter = pd.read_csv(feed_file, chunksize=1000, encoding="ISO-8859-1")
+                for feed_chunk in feed_chunk_iter:
+                    # Clean the second column in the feed file and set it as the key
+                    feed_chunk[feed_chunk.columns[1]] = feed_chunk[feed_chunk.columns[1]].astype(str).str.strip().str.lower()
+                    
+                    # Perform the merge using the second column of the feed file and col_9 of the PSV file
+                    merged_chunk = feed_chunk.merge(psv_data, left_on=feed_chunk.columns[1], right_on="col_9", how="left")
+                    merged_data.append(merged_chunk)
             
-            # Combine all merged data into a single DataFrame
+            # Concatenate all chunks into a single DataFrame
             final_data = pd.concat(merged_data, ignore_index=True)
             
             # Save the merged data to a file with user-selected location and filename
