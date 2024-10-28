@@ -21,22 +21,17 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
     first_chunk = True
     merged_output_path = os.path.join(merged_dir, f"merged_{os.path.basename(feed_file)}")
 
-    # Load just the header row to determine column names for the feed file
-    header_df = pd.read_csv(feed_file, nrows=0)
-    feed_columns = header_df.columns.tolist()
-
+    # For each chunk, read feed data with original headers and merge based on index without renaming columns
     for feed_chunk in pd.read_csv(feed_file, header=0, encoding='ISO-8859-1', chunksize=chunk_size):
-        # Use the dynamically retrieved column names
-        feed_chunk.columns = feed_columns
-        feed_chunk.rename(columns={'B': 'GBL_BKID'}, inplace=True)  # Rename specific column for clarity
-        feed_chunk.set_index('GBL_BKID', inplace=True)  # Set GBL_BKID as the index for matching with CDR
+        # Use original feed headers without renaming
+        feed_chunk.set_index(feed_chunk.columns[1], inplace=True)  # Set second column as the index for matching with CDR
 
-        # Merge chunk with CDR data based on GBL_BKID
+        # Merge chunk with CDR data based on index
         merged_df = feed_chunk.join(cdr_df, how='left', rsuffix='_cdr')
         
         # Define required numeric columns by index
         required_numeric_indices = [12, 24, 25, 30]  # Indices for columns 'M', 'Y', 'Z', 'AE'
-        numeric_col_names = [feed_columns[i] for i in required_numeric_indices if i < len(feed_columns)]
+        numeric_col_names = [feed_chunk.columns[i] for i in required_numeric_indices if i < len(feed_chunk.columns)]
         
         # Convert only available numeric columns to reduce memory
         if numeric_col_names:
@@ -48,16 +43,16 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
         # Convert large, repeated text columns to categorical to save memory
         merged_df['Product'] = 'Equity Derivatives'
         merged_df['Product'] = merged_df['Product'].astype('category')
-        merged_df['EQD_SEC_FLAG'] = merged_df['AM'] == 'Y'
+        merged_df['EQD_SEC_FLAG'] = merged_df.iloc[:, 38] == 'Y'  # Use column index for 'AM' column
         merged_df['EQD_SEC_FLAG'] = merged_df['EQD_SEC_FLAG'].astype('category')
         
         # Use numpy for vectorized calculations if columns are available
-        if all(i < len(feed_columns) for i in required_numeric_indices):
-            merged_df['Units'] = -np.asarray(merged_df[feed_columns[12]], dtype=np.float32)
+        if all(i < len(feed_chunk.columns) for i in required_numeric_indices):
+            merged_df['Units'] = -np.asarray(merged_df[feed_chunk.columns[12]], dtype=np.float32)
             merged_df['MTM (Local CCY)'] = (
-                np.asarray(merged_df[feed_columns[24]], dtype=np.float32) * 
-                np.asarray(merged_df[feed_columns[25]], dtype=np.float32) * 
-                np.asarray(merged_df[feed_columns[30]], dtype=np.float32)
+                np.asarray(merged_df[feed_chunk.columns[24]], dtype=np.float32) * 
+                np.asarray(merged_df[feed_chunk.columns[25]], dtype=np.float32) * 
+                np.asarray(merged_df[feed_chunk.columns[30]], dtype=np.float32)
             )
         merged_df['Close'] = close_value
 
