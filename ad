@@ -15,12 +15,12 @@ def load_cdr_file(cdr_file_path):
     
     return cdr_df
 
-def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged_dir):
+def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged_dir, save_final_output):
     # Set a smaller chunk size to reduce memory usage
     chunk_size = 2000
     first_chunk = True
     merged_output_path = os.path.join(merged_dir, f"merged_{os.path.basename(feed_file)}")
-    
+
     # Load just the header row to determine column names for the feed file
     header_df = pd.read_csv(feed_file, nrows=0)
     feed_columns = header_df.columns.tolist()
@@ -61,63 +61,65 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
             )
         merged_df['Close'] = close_value
 
-        # Assign all output columns to blank values
-        output_df = merged_df.assign(
-            Sent_Status="",
-            Sent="",
-            Error="",
-            Product="",
-            Name="",
-            LEI="",
-            AppandShortName="",
-            CDR_Application="",
-            Short_name="",
-            Entity="",
-            Entity_ID="",
-            CDRID="",
-            EQD_Client="",
-            Trade_ID="",
-            RBC_ID="",
-            RBC_Name="",
-            RBC_shortname="",
-            Fund="",
-            Trade_date="",
-            Maturity_Date="",
-            Sub_Product="",
-            EQD_DF_FLAG="",
-            EQD_SEC_FLAG="",
-            Underlying="",
-            Units="",
-            Contract_size="",
-            Call_put="",
-            CCY="",
-            Long_Short="",
-            Adjustment="",
-            Unit_Price_Local_CCY="",
-            COB="",
-            Close="",
-            MTM_Local_CCY="",
-            MTM_USD="",
-            Strategy="",
-            Load_Type=""
-        )
+        # Optionally save to the final output file if specified
+        if save_final_output:
+            # Assign all output columns to blank values
+            output_df = merged_df.assign(
+                Sent_Status="",
+                Sent="",
+                Error="",
+                Product="",
+                Name="",
+                LEI="",
+                AppandShortName="",
+                CDR_Application="",
+                Short_name="",
+                Entity="",
+                Entity_ID="",
+                CDRID="",
+                EQD_Client="",
+                Trade_ID="",
+                RBC_ID="",
+                RBC_Name="",
+                RBC_shortname="",
+                Fund="",
+                Trade_date="",
+                Maturity_Date="",
+                Sub_Product="",
+                EQD_DF_FLAG="",
+                EQD_SEC_FLAG="",
+                Underlying="",
+                Units="",
+                Contract_size="",
+                Call_put="",
+                CCY="",
+                Long_Short="",
+                Adjustment="",
+                Unit_Price_Local_CCY="",
+                COB="",
+                Close="",
+                MTM_Local_CCY="",
+                MTM_USD="",
+                Strategy="",
+                Load_Type=""
+            )
 
-        # Define the exact order of the 37 output columns
-        output_columns = [
-            'Sent_Status', 'Sent', 'Error', 'Product', 'Name', 'LEI', 'AppandShortName', 'CDR_Application',
-            'Short_name', 'Entity', 'Entity_ID', 'CDRID', 'EQD_Client', 'Trade_ID', 'RBC_ID', 'RBC_Name', 
-            'RBC_shortname', 'Fund', 'Trade_date', 'Maturity_Date', 'Sub_Product', 'EQD_DF_FLAG', 'EQD_SEC_FLAG',
-            'Underlying', 'Units', 'Contract_size', 'Call_put', 'CCY', 'Long_Short', 'Adjustment', 
-            'Unit_Price_Local_CCY', 'COB', 'Close', 'MTM_Local_CCY', 'MTM_USD', 'Strategy', 'Load_Type'
-        ]
+            # Define the exact order of the 37 output columns
+            output_columns = [
+                'Sent_Status', 'Sent', 'Error', 'Product', 'Name', 'LEI', 'AppandShortName', 'CDR_Application',
+                'Short_name', 'Entity', 'Entity_ID', 'CDRID', 'EQD_Client', 'Trade_ID', 'RBC_ID', 'RBC_Name', 
+                'RBC_shortname', 'Fund', 'Trade_date', 'Maturity_Date', 'Sub_Product', 'EQD_DF_FLAG', 'EQD_SEC_FLAG',
+                'Underlying', 'Units', 'Contract_size', 'Call_put', 'CCY', 'Long_Short', 'Adjustment', 
+                'Unit_Price_Local_CCY', 'COB', 'Close', 'MTM_Local_CCY', 'MTM_USD', 'Strategy', 'Load_Type'
+            ]
 
-        # Select only the 37 columns and write them to the output file
-        output_df = output_df[output_columns]
-        output_df.to_csv(output_file, mode='a', index=False, header=first_chunk)
-        first_chunk = False  # After the first write, subsequent chunks will not write the header
+            # Select only the 37 columns and write them to the output file
+            output_df = output_df[output_columns]
+            output_df.to_csv(output_file, mode='a', index=False, header=first_chunk)
+            first_chunk = False  # After the first write, subsequent chunks will not write the header
 
         # Explicitly delete processed data and run garbage collection
-        del feed_chunk, merged_df, output_df
+        del feed_chunk, merged_df
         gc.collect()
 
 class DataProcessorApp:
@@ -130,6 +132,7 @@ class DataProcessorApp:
         self.cdr_file = None
         self.output_file = None
         self.merged_dir = None
+        self.save_final_output = tk.BooleanVar(value=True)
         
         # UI Setup
         tk.Label(root, text="Select Feed File 1").grid(row=0, column=0, padx=10, pady=5)
@@ -155,10 +158,14 @@ class DataProcessorApp:
         tk.Label(root, text="Save Merged Files To").grid(row=5, column=0, padx=10, pady=5)
         self.merged_btn = tk.Button(root, text="Browse", command=self.select_merged_dir)
         self.merged_btn.grid(row=5, column=1, padx=10, pady=5)
-        
+
+        # Option to Save Final Output File
+        self.final_output_check = tk.Checkbutton(root, text="Save Final Output File", variable=self.save_final_output)
+        self.final_output_check.grid(row=6, column=0, columnspan=2, pady=5)
+
         # Process Button
         self.process_btn = tk.Button(root, text="Process Files", command=self.process_files)
-        self.process_btn.grid(row=6, column=0, columnspan=2, pady=20)
+        self.process_btn.grid(row=7, column=0, columnspan=2, pady=20)
     
     def select_file(self, idx):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
@@ -193,11 +200,11 @@ class DataProcessorApp:
             # Load CDR file once and use it for all feed files
             cdr_df = load_cdr_file(self.cdr_file)
 
-            # Process each feed file in chunks and append to output file
+            # Process each feed file in chunks and conditionally save the final output
             for i, feed_file in enumerate(self.feed_files, start=1):
-                process_single_feed_file(feed_file, cdr_df, self.output_file, i, self.merged_dir)
+                process_single_feed_file(feed_file, cdr_df, self.output_file, i, self.merged_dir, self.save_final_output.get())
             
-            messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
+            messagebox.showinfo("Success", "Processing complete.")
         
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {e}")
