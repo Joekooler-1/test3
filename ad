@@ -5,16 +5,6 @@ import numpy as np
 import os
 import gc
 
-def generate_column_names(num_columns):
-    column_names = []
-    for i in range(1, num_columns + 1):
-        name = ""
-        while i > 0:
-            i, remainder = divmod(i - 1, 26)
-            name = chr(65 + remainder) + name
-        column_names.append(name)
-    return column_names
-
 def load_cdr_file(cdr_file_path):
     # Load only the needed columns from the CDR file, rename columns accordingly
     usecols = [0, 9, 25, 24, 21, 5, 2]  # Columns A, J, Z, Y, V, F, C
@@ -30,8 +20,14 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
     first_chunk = True
     merged_output_path = os.path.join(merged_dir, f"merged_{os.path.basename(feed_file)}")
 
+    # Define column names explicitly for the feed file
+    feed_columns = [
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
+        'W', 'X', 'Y', 'Z', 'AA', 'AB', 'AC', 'AD', 'AE', 'AF', 'AG', 'AH', 'AI', 'AJ', 'AK', 'AL', 'AM'
+    ]
+    
     for feed_chunk in pd.read_csv(feed_file, header=None, encoding='ISO-8859-1', chunksize=chunk_size):
-        feed_columns = generate_column_names(feed_chunk.shape[1])
+        # Assign pre-defined column names
         feed_chunk.columns = feed_columns
         feed_chunk.rename(columns={'B': 'GBL_BKID'}, inplace=True)  # Rename column B to GBL_BKID
         feed_chunk.set_index('GBL_BKID', inplace=True)  # Set GBL_BKID as the index for matching with CDR
@@ -123,91 +119,3 @@ def process_single_feed_file(feed_file, cdr_df, output_file, close_value, merged
         # Explicitly delete processed data and run garbage collection
         del feed_chunk, merged_df, output_df
         gc.collect()
-
-class DataProcessorApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Data Processor")
-        
-        # File paths
-        self.feed_files = [None, None, None]
-        self.cdr_file = None
-        self.output_file = None
-        self.merged_dir = None
-        
-        # UI Setup
-        tk.Label(root, text="Select Feed File 1").grid(row=0, column=0, padx=10, pady=5)
-        self.feed1_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(0))
-        self.feed1_btn.grid(row=0, column=1, padx=10, pady=5)
-        
-        tk.Label(root, text="Select Feed File 2").grid(row=1, column=0, padx=10, pady=5)
-        self.feed2_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(1))
-        self.feed2_btn.grid(row=1, column=1, padx=10, pady=5)
-        
-        tk.Label(root, text="Select Feed File 3").grid(row=2, column=0, padx=10, pady=5)
-        self.feed3_btn = tk.Button(root, text="Browse", command=lambda: self.select_file(2))
-        self.feed3_btn.grid(row=2, column=1, padx=10, pady=5)
-        
-        tk.Label(root, text="Select CDR File").grid(row=3, column=0, padx=10, pady=5)
-        self.cdr_btn = tk.Button(root, text="Browse", command=self.select_cdr_file)
-        self.cdr_btn.grid(row=3, column=1, padx=10, pady=5)
-        
-        tk.Label(root, text="Save Output As").grid(row=4, column=0, padx=10, pady=5)
-        self.output_btn = tk.Button(root, text="Browse", command=self.select_output_file)
-        self.output_btn.grid(row=4, column=1, padx=10, pady=5)
-
-        tk.Label(root, text="Save Merged Files To").grid(row=5, column=0, padx=10, pady=5)
-        self.merged_btn = tk.Button(root, text="Browse", command=self.select_merged_dir)
-        self.merged_btn.grid(row=5, column=1, padx=10, pady=5)
-        
-        # Process Button
-        self.process_btn = tk.Button(root, text="Process Files", command=self.process_files)
-        self.process_btn.grid(row=6, column=0, columnspan=2, pady=20)
-    
-    def select_file(self, idx):
-        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
-        if file_path:
-            self.feed_files[idx] = file_path
-            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=idx, column=2)
-    
-    def select_cdr_file(self):
-        file_path = filedialog.askopenfilename(filetypes=[("PSV Files", "*.psv")])
-        if file_path:
-            self.cdr_file = file_path
-            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=3, column=2)
-    
-    def select_output_file(self):
-        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
-        if file_path:
-            self.output_file = file_path
-            tk.Label(self.root, text=os.path.basename(file_path)).grid(row=4, column=2)
-
-    def select_merged_dir(self):
-        directory = filedialog.askdirectory()
-        if directory:
-            self.merged_dir = directory
-            tk.Label(self.root, text=os.path.basename(directory)).grid(row=5, column=2)
-
-    def process_files(self):
-        if not all(self.feed_files) or not self.cdr_file or not self.output_file or not self.merged_dir:
-            messagebox.showerror("Error", "Please select all feed files, CDR file, output file, and merged directory.")
-            return
-        
-        try:
-            # Load CDR file once and use it for all feed files
-            cdr_df = load_cdr_file(self.cdr_file)
-
-            # Process each feed file in chunks and append to output file
-            for i, feed_file in enumerate(self.feed_files, start=1):
-                process_single_feed_file(feed_file, cdr_df, self.output_file, i, self.merged_dir)
-            
-            messagebox.showinfo("Success", f"Combined data saved to {self.output_file}")
-        
-        except Exception as e:
-            messagebox.showerror("Error", f"An error occurred: {e}")
-
-# Run the application
-if __name__ == '__main__':
-    root = tk.Tk()
-    app = DataProcessorApp(root)
-    root.mainloop()
