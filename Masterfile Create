@@ -9,61 +9,68 @@ class DataMergerApp:
         self.root.title("Feed and PSV File Merger")
         
         # Initialize file paths
-        self.feed_files = []
+        self.feed_files = ["", "", ""]
         self.psv_file = ""
         
         # UI Elements
-        tk.Label(root, text="Select Feed Files and PSV File").grid(row=0, column=0, columnspan=3, pady=10)
+        tk.Label(root, text="Select Feed Files and PSV File").grid(row=0, column=0, columnspan=2, pady=10)
         
-        tk.Button(root, text="Select Feed File 1", command=partial(self.select_feed_file, 1)).grid(row=1, column=0, padx=5, pady=5)
-        tk.Button(root, text="Select Feed File 2", command=partial(self.select_feed_file, 2)).grid(row=1, column=1, padx=5, pady=5)
-        tk.Button(root, text="Select Feed File 3", command=partial(self.select_feed_file, 3)).grid(row=1, column=2, padx=5, pady=5)
+        # Feed file selection buttons and labels
+        for i in range(3):
+            tk.Button(root, text=f"Select Feed File {i + 1}", command=partial(self.select_feed_file, i)).grid(row=i + 1, column=0, padx=5, pady=5)
+            label = tk.Label(root, text="No file selected")
+            label.grid(row=i + 1, column=1, padx=5)
+            setattr(self, f"feed_label_{i}", label)  # Dynamically store each label as an attribute for easy updating
         
-        tk.Button(root, text="Select PSV File", command=self.select_psv_file).grid(row=2, column=0, columnspan=3, pady=10)
+        # PSV file selection button and label
+        tk.Button(root, text="Select PSV File", command=self.select_psv_file).grid(row=4, column=0, padx=5, pady=5)
+        self.psv_label = tk.Label(root, text="No file selected")
+        self.psv_label.grid(row=4, column=1, padx=5)
         
-        tk.Button(root, text="Merge Files", command=self.merge_files).grid(row=3, column=0, columnspan=3, pady=20)
+        # Merge button
+        tk.Button(root, text="Merge Files", command=self.merge_files).grid(row=5, column=0, columnspan=2, pady=20)
         
+        # Output label
         self.output_label = tk.Label(root, text="")
-        self.output_label.grid(row=4, column=0, columnspan=3, pady=10)
+        self.output_label.grid(row=6, column=0, columnspan=2, pady=10)
 
     def select_feed_file(self, index):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if file_path:
-            if len(self.feed_files) < index:
-                self.feed_files.append(file_path)
-            else:
-                self.feed_files[index - 1] = file_path
-            self.update_label(f"Feed File {index} selected.")
+            self.feed_files[index] = file_path
+            # Update the corresponding feed file label
+            getattr(self, f"feed_label_{index}").config(text=file_path.split("/")[-1])
 
     def select_psv_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("PSV Files", "*.psv")])
         if file_path:
             self.psv_file = file_path
-            self.update_label("PSV File selected.")
+            # Update the PSV file label
+            self.psv_label.config(text=file_path.split("/")[-1])
 
     def update_label(self, text):
         self.output_label.config(text=text)
 
     def merge_files(self):
-        if len(self.feed_files) < 3 or not self.psv_file:
+        if "" in self.feed_files or not self.psv_file:
             messagebox.showwarning("Missing Files", "Please select all three feed files and the PSV file.")
             return
         
         try:
-            # Load the PSV file with selected columns only
-            psv_data = pd.read_csv(self.psv_file, sep="|", usecols=[0, 2, 5, 9, 21, 24, 25])
+            # Load the PSV file with selected columns only, specifying an encoding
+            psv_data = pd.read_csv(self.psv_file, sep="|", usecols=[0, 2, 5, 9, 21, 24, 25], encoding="ISO-8859-1")
             
             # Merge each feed file with the PSV file based on the matching criteria
             merged_data = []
             for feed_file in self.feed_files:
-                feed_data = pd.read_csv(feed_file)
+                feed_data = pd.read_csv(feed_file, encoding="ISO-8859-1")
                 merged = feed_data.merge(psv_data, left_on=feed_data.columns[0], right_on=psv_data.columns[3], how="left")
                 merged_data.append(merged)
             
             # Combine all merged data into a single DataFrame
             final_data = pd.concat(merged_data, ignore_index=True)
             
-            # Save or display result (for example, saving to a new file)
+            # Save the merged data to a file with user-selected location and filename
             output_file = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
             if output_file:
                 final_data.to_csv(output_file, index=False)
