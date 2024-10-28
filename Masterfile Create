@@ -1,0 +1,80 @@
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from functools import partial
+
+class DataMergerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Feed and PSV File Merger")
+        
+        # Initialize file paths
+        self.feed_files = []
+        self.psv_file = ""
+        
+        # UI Elements
+        tk.Label(root, text="Select Feed Files and PSV File").grid(row=0, column=0, columnspan=3, pady=10)
+        
+        tk.Button(root, text="Select Feed File 1", command=partial(self.select_feed_file, 1)).grid(row=1, column=0, padx=5, pady=5)
+        tk.Button(root, text="Select Feed File 2", command=partial(self.select_feed_file, 2)).grid(row=1, column=1, padx=5, pady=5)
+        tk.Button(root, text="Select Feed File 3", command=partial(self.select_feed_file, 3)).grid(row=1, column=2, padx=5, pady=5)
+        
+        tk.Button(root, text="Select PSV File", command=self.select_psv_file).grid(row=2, column=0, columnspan=3, pady=10)
+        
+        tk.Button(root, text="Merge Files", command=self.merge_files).grid(row=3, column=0, columnspan=3, pady=20)
+        
+        self.output_label = tk.Label(root, text="")
+        self.output_label.grid(row=4, column=0, columnspan=3, pady=10)
+
+    def select_feed_file(self, index):
+        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        if file_path:
+            if len(self.feed_files) < index:
+                self.feed_files.append(file_path)
+            else:
+                self.feed_files[index - 1] = file_path
+            self.update_label(f"Feed File {index} selected.")
+
+    def select_psv_file(self):
+        file_path = filedialog.askopenfilename(filetypes=[("PSV Files", "*.psv")])
+        if file_path:
+            self.psv_file = file_path
+            self.update_label("PSV File selected.")
+
+    def update_label(self, text):
+        self.output_label.config(text=text)
+
+    def merge_files(self):
+        if len(self.feed_files) < 3 or not self.psv_file:
+            messagebox.showwarning("Missing Files", "Please select all three feed files and the PSV file.")
+            return
+        
+        try:
+            # Load the PSV file with selected columns only
+            psv_data = pd.read_csv(self.psv_file, sep="|", usecols=[0, 2, 5, 9, 21, 24, 25])
+            
+            # Merge each feed file with the PSV file based on the matching criteria
+            merged_data = []
+            for feed_file in self.feed_files:
+                feed_data = pd.read_csv(feed_file)
+                merged = feed_data.merge(psv_data, left_on=feed_data.columns[0], right_on=psv_data.columns[3], how="left")
+                merged_data.append(merged)
+            
+            # Combine all merged data into a single DataFrame
+            final_data = pd.concat(merged_data, ignore_index=True)
+            
+            # Save or display result (for example, saving to a new file)
+            output_file = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
+            if output_file:
+                final_data.to_csv(output_file, index=False)
+                self.update_label(f"Files merged and saved to {output_file}")
+            else:
+                self.update_label("Merge operation canceled.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+# Run the Tkinter application
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = DataMergerApp(root)
+    root.mainloop()
